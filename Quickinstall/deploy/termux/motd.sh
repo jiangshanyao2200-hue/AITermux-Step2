@@ -1888,8 +1888,14 @@ motd_has_codex() {
   [ -x "$PREFIX/bin/codex" ] || return 1
   [ -f "$PREFIX/lib/node_modules/@openai/codex/bin/codex.js" ] || return 1
   case "$(node -p 'process.arch' 2>/dev/null || true)" in
-    arm64) [ -x "$PREFIX/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex" ] ;;
-    x64) [ -x "$PREFIX/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex" ] ;;
+    arm64)
+      [ -x "$PREFIX/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex" ] ||
+        [ -x "$PREFIX/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex" ]
+      ;;
+    x64)
+      [ -x "$PREFIX/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex" ] ||
+        [ -x "$PREFIX/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex" ]
+      ;;
     *) return 1 ;;
   esac
 }
@@ -2523,6 +2529,9 @@ motd_config_label_for_index() {
     1) printf '%s\n' '启动项管理' ;;
     2) printf '%s\n' '开屏动画速度' ;;
     3) printf '%s\n' 'PROJECT凌设置' ;;
+    4) printf '%s\n' '检测 PROJECT萤 更新' ;;
+    5) printf '%s\n' '检测 PROJECT凌 更新' ;;
+    6) printf '%s\n' '检测 AITermux 更新' ;;
     *) printf '%s\n' '' ;;
   esac
 }
@@ -3199,7 +3208,7 @@ motd_run_speed_menu() {
   local action='' last_size='' last_key='' current_size='' current_key='' redraw_needed=1
   local selected=1
 
-  MOTD_CONFIG_TOTAL=5
+  MOTD_CONFIG_TOTAL=3
   MOTD_CONFIG_SELECTED="$(motd_clamp_menu_selection "${MOTD_CONFIG_SELECTED:-1}" "$MOTD_CONFIG_TOTAL")"
   motd_input_reset config_select
   while :; do

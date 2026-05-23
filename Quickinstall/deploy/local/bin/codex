@@ -4,16 +4,25 @@ set -euo pipefail
 PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
 REAL_CODEX="${PREFIX_DIR}/bin/codex"
 CODEX_JS="${PREFIX_DIR}/lib/node_modules/@openai/codex/bin/codex.js"
+native=''
 
 arch="$(node -p 'process.arch' 2>/dev/null || true)"
 case "$arch" in
   arm64)
-    native="${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex"
     platform_pkg='@openai/codex-linux-arm64'
+    for candidate in \
+      "${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex" \
+      "${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex"; do
+      [ -f "$candidate" ] && { native="$candidate"; break; }
+    done
     ;;
   x64)
-    native="${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex"
     platform_pkg='@openai/codex-linux-x64'
+    for candidate in \
+      "${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex" \
+      "${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex"; do
+      [ -f "$candidate" ] && { native="$candidate"; break; }
+    done
     ;;
   *)
     printf 'CODEX 无法启动：当前 Node 架构不受支持：%s\n' "${arch:-unknown}" >&2
@@ -24,6 +33,7 @@ esac
 codex_ready() {
   [ -x "$REAL_CODEX" ] || return 1
   [ -s "$CODEX_JS" ] || return 1
+  [ -n "$native" ] || return 1
   [ -x "$native" ] || return 1
 }
 
@@ -41,9 +51,27 @@ if ! codex_ready; then
 fi
 
 if ! codex_ready; then
+  native=''
+  case "$arch" in
+    arm64)
+      for candidate in \
+        "${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex" \
+        "${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex"; do
+        [ -f "$candidate" ] && { native="$candidate"; break; }
+      done
+      ;;
+    x64)
+      for candidate in \
+        "${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex" \
+        "${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex"; do
+        [ -f "$candidate" ] && { native="$candidate"; break; }
+      done
+      ;;
+  esac
+  [ -n "$native" ] && chmod 0755 "$native" 2>/dev/null || true
   if [ ! -x "$REAL_CODEX" ] || [ ! -s "$CODEX_JS" ]; then
     printf 'CODEX 尚未安装完整。请运行：aitermux-cli-install codex\n' >&2
-  elif [ ! -x "$native" ]; then
+  elif [ -z "$native" ] || [ ! -x "$native" ]; then
     printf 'CODEX 缺少原生组件：%s\n' "$platform_pkg" >&2
     printf '请运行：aitermux-cli-install codex\n' >&2
   fi
