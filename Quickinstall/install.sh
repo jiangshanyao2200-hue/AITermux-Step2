@@ -8,7 +8,7 @@ AITERMUX_HOME="${AITERMUX_HOME:-$HOME/AItermux}"
 PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/projectying-termux.git}"
 PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/projectling-termux.git}"
 BACKUP_ROOT="$AITERMUX_HOME/backups"
-AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/aidebug}"
+AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/projectling/aidebug}"
 AIDEBUG_LOG_DIR="$AIDEBUG_DIR/logs"
 INSTALL_AIDEBUG_LOG="$AIDEBUG_LOG_DIR/install.log"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -30,6 +30,7 @@ AITermux 一键覆盖部署（Termux）
 
 环境变量：
   AITERMUX_HOME            默认：$HOME/AItermux
+  AITERMUX_AIDEBUG_DIR     默认：$HOME/AItermux/projectling/aidebug
   AITERMUX_PROJECTYING_REPO 默认：https://github.com/jiangshanyao2200-hue/projectying-termux.git
   AITERMUX_PROJECTLING_REPO 默认：https://github.com/jiangshanyao2200-hue/projectling-termux.git
 EOF
@@ -206,27 +207,23 @@ install_zsh_theme() {
 }
 
 install_aidebug_runtime() {
-  local src_dir="$REPO_ROOT/aidebug"
-
-  log "准备 aidebug 统一调试链路"
+  log "准备 ProjectLing aidebug 调试链路"
   run_cmd mkdir -p \
     "$AIDEBUG_DIR" \
     "$AIDEBUG_DIR/bin" \
     "$AIDEBUG_DIR/logs" \
+    "$AIDEBUG_DIR/notes" \
     "$AIDEBUG_DIR/state" \
     "$AIDEBUG_DIR/legacy" \
+    "$AIDEBUG_DIR/tmp" \
     "$AIDEBUG_DIR/projectling/terminal output" \
     "$HOME/.local/bin"
 
-  if [ -f "$src_dir/README.md" ] && [ "$src_dir/README.md" != "$AIDEBUG_DIR/README.md" ]; then
-    install_file "$src_dir/README.md" "$AIDEBUG_DIR/README.md" 0644
-  fi
-  if [ -f "$src_dir/bin/aidebug" ] && [ "$src_dir/bin/aidebug" != "$AIDEBUG_DIR/bin/aidebug" ]; then
-    install_file "$src_dir/bin/aidebug" "$AIDEBUG_DIR/bin/aidebug" 0755
-  fi
   if [ -f "$AIDEBUG_DIR/bin/aidebug" ]; then
     run_cmd chmod 0755 "$AIDEBUG_DIR/bin/aidebug"
     run_cmd ln -sfn "$AIDEBUG_DIR/bin/aidebug" "$HOME/.local/bin/aidebug"
+  else
+    log "aidebug 启动器尚未就绪，将在 ProjectLing 拉取后自动补链。"
   fi
 }
 
@@ -339,6 +336,7 @@ install_file "$QUICK_ROOT/deploy/aitermux/aitermux" "$AITERMUX_HOME/bin/aitermux
 install_file "$QUICK_ROOT/deploy/aitermux/bootstrap.sh" "$AITERMUX_HOME/bin/aitermux-bootstrap" 0755
 install_aitermux_bin_tools
 install_project_components
+install_aidebug_runtime
 
 install_zsh_theme
 

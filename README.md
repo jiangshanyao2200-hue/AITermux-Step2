@@ -88,7 +88,7 @@ aitermux-cli-install update-projects
 - `bin/aitermux-bootstrap`：运行时缺失依赖补装器
 - `bin/aitermux`：AITermux 启动器
 - `startboot/`：本机动画脚本池
-- `aidebug/`：本机调试日志目录，默认不随仓库发布
+- `projectling/aidebug/`：Project凌 的本机调试日志目录，默认不随仓库发布
 
 ## 使用前确认
 

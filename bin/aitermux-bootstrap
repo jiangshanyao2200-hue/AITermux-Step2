@@ -9,7 +9,7 @@ PROJECTLING_DIR="$AITERMUX_HOME/projectling"
 PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/projectying-termux.git}"
 PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/projectling-termux.git}"
 STATE_DIR="$AITERMUX_HOME/.state/bootstrap"
-AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/aidebug}"
+AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/projectling/aidebug}"
 LOG_DIR="$AIDEBUG_DIR/logs"
 STARTUP_LOG="$LOG_DIR/startup.log"
 BOOTSTRAP_LOG="$LOG_DIR/bootstrap.log"
@@ -31,7 +31,7 @@ AITermux bootstrap
   默认会检查并补装 projectying、projectling、codex、gemini、claude。
   projectying/projectling 默认从公开 Termux 仓库 clone；可用 AITERMUX_PROJECTYING_REPO / AITERMUX_PROJECTLING_REPO 覆盖。
   --update 对 aitermux/projectying/projectling 生效：检查远端 main 是否有新提交，有就 fast-forward 拉取源码。
-  失败会写入 ~/AItermux/aidebug/logs/startup.log，并做短暂退避，避免每次登录都重复阻塞。
+  失败会写入 ~/AItermux/projectling/aidebug/logs/startup.log，并做短暂退避，避免每次登录都重复阻塞。
 EOF
 }
 
@@ -561,6 +561,48 @@ update_git_project() {
   return 0
 }
 
+projectling_dir_is_aidebug_only() {
+  local item="" base=""
+
+  [[ -d "$PROJECTLING_DIR" ]] || return 1
+  shopt -s nullglob dotglob
+  for item in "$PROJECTLING_DIR"/*; do
+    base="$(basename "$item")"
+    case "$base" in
+      aidebug) ;;
+      .|..) ;;
+      *) return 1 ;;
+    esac
+  done
+  shopt -u nullglob dotglob
+  return 0
+}
+
+clone_projectling_preserving_aidebug() {
+  local tmp_dir=""
+  local item=""
+
+  if [[ ! -d "$PROJECTLING_DIR" ]]; then
+    git clone "$PROJECTLING_REPO" "$PROJECTLING_DIR"
+    return $?
+  fi
+
+  tmp_dir="${PROJECTLING_DIR}.clone.$$"
+  rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  git clone "$PROJECTLING_REPO" "$tmp_dir" || return 1
+  shopt -s nullglob dotglob
+  for item in "$tmp_dir"/*; do
+    mv "$item" "$PROJECTLING_DIR"/ || {
+      shopt -u nullglob dotglob
+      rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+      return 1
+    }
+  done
+  shopt -u nullglob dotglob
+  rmdir "$tmp_dir" >/dev/null 2>&1 || rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  return 0
+}
+
 ensure_projectying() {
   local component="projectying"
 
@@ -618,16 +660,16 @@ ensure_projectling() {
     return 1
   }
 
-  if [[ -e "$PROJECTLING_DIR" && ! -d "$PROJECTLING_DIR/.git" ]]; then
+  if [[ -e "$PROJECTLING_DIR" && ! -d "$PROJECTLING_DIR/.git" ]] && ! projectling_dir_is_aidebug_only; then
     log "component=${component} path-exists-but-invalid path=$PROJECTLING_DIR"
     state_set "$component" fail path-exists-but-invalid
     return 1
   fi
 
-  if [[ ! -d "$PROJECTLING_DIR" ]]; then
+  if [[ ! -d "$PROJECTLING_DIR/.git" ]]; then
     mkdir -p "$AITERMUX_HOME" >/dev/null 2>&1 || true
     log "git clone component=${component} repo=${PROJECTLING_REPO}"
-    if ! git clone "$PROJECTLING_REPO" "$PROJECTLING_DIR"; then
+    if ! clone_projectling_preserving_aidebug; then
       state_set "$component" fail git-clone-failed
       return 1
     fi

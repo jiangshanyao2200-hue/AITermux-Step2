@@ -91,9 +91,9 @@ bash install.sh --quiet
 
 `projectying` 是 Rust 源码项目，不走 npm。源码拉取或更新后，`run.sh` 会在首次打开或源码变更时自动执行 `cargo build --release`。
 
-安装失败不会阻塞进入菜单；错误会写进 `~/AItermux/aidebug/logs/startup.log`，后续按退避策略重试。
+安装失败不会阻塞进入菜单；错误会写进 `~/AItermux/projectling/aidebug/logs/startup.log`，后续按退避策略重试。
 
-日志不会无限增长：motd、zshrc、bootstrap、projectling 会按大小保留最近尾部日志，并按天数清理 `aidebug/tmp` 和 ProjectLing terminal 临时输出；`notes/`、`backup/`、`legacy/` 默认不会自动删除。
+日志不会无限增长：motd、zshrc、bootstrap、projectling 会按大小保留最近尾部日志，并按天数清理 `projectling/aidebug/tmp` 和 ProjectLing terminal 临时输出；`notes/`、`backup/`、`legacy/` 默认不会自动删除。
 
 ## 运行时可调参数（开屏动画）
 
@@ -115,5 +115,5 @@ bash install.sh --quiet
 ## 安装可视化与回滚
 
 - 每次安装会创建备份目录：`~/AItermux/backups/upgrade-YYYYMMDD-HHMMSS/`
-- 安装过程会输出每一步，并同时写入备份目录的 `install.log` 与 `~/AItermux/aidebug/logs/install.log`
+- 安装过程会输出每一步，并同时写入备份目录的 `install.log` 与 `~/AItermux/projectling/aidebug/logs/install.log`
 - 回滚脚本：`rollback.sh`（把备份文件复制回原路径）

@@ -1,7 +1,7 @@
 # launcher 已回收到 ~/.termux/motd.sh；zsh 保持普通 shell。
 PROMPT_EOL_MARK=''
 AITERMUX_HOME="${AITERMUX_HOME:-$HOME/AItermux}"
-AITERMUX_AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/aidebug}"
+AITERMUX_AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/projectling/aidebug}"
 AITERMUX_AIDEBUG_LOG_DIR="$AITERMUX_AIDEBUG_DIR/logs"
 
 case ":${PATH:-}:" in
@@ -12,7 +12,7 @@ case ":${PATH:-}:" in
   *":$HOME/.local/bin:"*) ;;
   *) PATH="$HOME/.local/bin:${PATH:-}" ;;
 esac
-export PATH
+export PATH AITERMUX_HOME AITERMUX_AIDEBUG_DIR
 
 aitermux_shrink_log_tail_if_over_kb() {
   local path="$1"

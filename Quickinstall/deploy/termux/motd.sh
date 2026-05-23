@@ -39,7 +39,7 @@ motd_sync_end() {
 
 ROOT_DIR="${AITERMUX_HOME:-$HOME/AItermux}"
 START_DIR="$ROOT_DIR/startboot"
-AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$ROOT_DIR/aidebug}"
+AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$ROOT_DIR/projectling/aidebug}"
 LOG_DIR="$AIDEBUG_DIR/logs"
 LEGACY_LOG_DIR="$ROOT_DIR/logs"
 STATE_DIR="$ROOT_DIR/.state/motd"
