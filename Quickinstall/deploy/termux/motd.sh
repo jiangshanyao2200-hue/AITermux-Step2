@@ -1743,6 +1743,18 @@ motd_bootstrap_latest_line() {
     git\ clone\ component=projectling*)
       line="正在拉取 PROJECT凌"
       ;;
+    component=projectling\ repair\ missing-runsh*)
+      line="正在修复 PROJECT凌 源码入口"
+      ;;
+    component=projectling\ path-invalid-backup*)
+      line="正在备份异常 PROJECT凌 目录"
+      ;;
+    component=projectying\ repair\ missing-runsh*)
+      line="正在修复 PROJECT萤 源码入口"
+      ;;
+    component=projectying\ path-invalid-backup*)
+      line="正在备份异常 PROJECT萤 目录"
+      ;;
     component=aitermux\ update-none*)
       line="AITermux 已是最新版本"
       ;;
@@ -1873,6 +1885,16 @@ motd_bootstrap_component_now() {
   latest="$(motd_bootstrap_latest_line "$run_log" || true)"
   reason="$(motd_bootstrap_state_reason "$component" || true)"
   summary="$label ${action_label}失败"
+  case "$reason" in
+    missing-runsh) reason="源码不完整，缺少 run.sh" ;;
+    missing-projectling-stack) reason="缺少 git 或 python，无法准备 PROJECT凌" ;;
+    missing-build-stack) reason="缺少 git/rust/clang/make 等构建依赖" ;;
+    git-clone-failed) reason="源码拉取失败" ;;
+    git-fetch-failed) reason="远端检查失败" ;;
+    git-pull-failed) reason="源码更新失败" ;;
+    dirty-worktree) reason="本地源码有未提交改动，已停止自动更新" ;;
+    path-exists-but-invalid) reason="本地目录异常，无法识别为源码仓库" ;;
+  esac
   [ -n "$reason" ] && summary="$summary：$reason"
   [ -n "$latest" ] && summary="$summary / $latest"
   motd_launcher_log "bootstrap_fail component=$component rc=$rc reason=$(motd_sanitize_field "$reason") latest=$(motd_sanitize_field "$latest")"

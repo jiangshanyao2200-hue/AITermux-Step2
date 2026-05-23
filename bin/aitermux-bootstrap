@@ -665,7 +665,7 @@ projectling_dir_is_aidebug_only() {
 
 clone_projectling_preserving_aidebug() {
   local tmp_dir=""
-  local item=""
+  local saved_aidebug=""
 
   if [[ ! -d "$PROJECTLING_DIR" ]]; then
     git clone "$PROJECTLING_REPO" "$PROJECTLING_DIR"
@@ -673,18 +673,60 @@ clone_projectling_preserving_aidebug() {
   fi
 
   tmp_dir="${PROJECTLING_DIR}.clone.$$"
+  saved_aidebug="${PROJECTLING_DIR}.aidebug.$$"
   rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  rm -rf "$saved_aidebug" >/dev/null 2>&1 || true
+
   git clone "$PROJECTLING_REPO" "$tmp_dir" || return 1
-  shopt -s nullglob dotglob
-  for item in "$tmp_dir"/*; do
-    mv "$item" "$PROJECTLING_DIR"/ || {
-      shopt -u nullglob dotglob
+
+  if [[ -d "$PROJECTLING_DIR/aidebug" ]]; then
+    mv "$PROJECTLING_DIR/aidebug" "$saved_aidebug" || {
       rm -rf "$tmp_dir" >/dev/null 2>&1 || true
       return 1
     }
-  done
-  shopt -u nullglob dotglob
-  rmdir "$tmp_dir" >/dev/null 2>&1 || rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  fi
+
+  rm -rf "$PROJECTLING_DIR" >/dev/null 2>&1 || {
+    rm -rf "$tmp_dir" "$saved_aidebug" >/dev/null 2>&1 || true
+    return 1
+  }
+  mv "$tmp_dir" "$PROJECTLING_DIR" || {
+    rm -rf "$tmp_dir" "$saved_aidebug" >/dev/null 2>&1 || true
+    return 1
+  }
+
+  if [[ -d "$saved_aidebug" ]]; then
+    mkdir -p "$PROJECTLING_DIR/aidebug" >/dev/null 2>&1 || true
+    cp -a "$saved_aidebug/." "$PROJECTLING_DIR/aidebug/" >/dev/null 2>&1 || true
+    rm -rf "$saved_aidebug" >/dev/null 2>&1 || true
+  fi
+
+  return 0
+}
+
+backup_invalid_component_dir() {
+  local dir="$1"
+  local component="$2"
+  local stamp backup
+
+  stamp="$(date +%Y%m%d-%H%M%S 2>/dev/null || date +%s 2>/dev/null || echo now)"
+  backup="${dir}.invalid-${stamp}"
+  log "component=${component} path-invalid-backup from=${dir} to=${backup}"
+  mv "$dir" "$backup"
+}
+
+repair_git_component_missing_runsh() {
+  local component="$1"
+  local dir="$2"
+  local repo="$3"
+
+  [[ -d "$dir/.git" ]] || return 1
+  ensure_project_clone_stack || return 1
+  log "component=${component} repair missing-runsh path=$dir"
+  git -C "$dir" remote set-url origin "$repo" >/dev/null 2>&1 || true
+  git -C "$dir" fetch origin main || return 1
+  git -C "$dir" reset --hard origin/main || return 1
+  [[ -f "$dir/run.sh" ]]
   return 0
 }
 
@@ -705,12 +747,14 @@ ensure_projectying() {
   }
 
   if [[ -e "$PROJECTYING_DIR" && ! -d "$PROJECTYING_DIR/.git" ]]; then
-    log "component=${component} path-exists-but-invalid path=$PROJECTYING_DIR"
-    state_set "$component" fail path-exists-but-invalid
-    return 1
+    if ! backup_invalid_component_dir "$PROJECTYING_DIR" "$component"; then
+      log "component=${component} path-exists-but-invalid path=$PROJECTYING_DIR"
+      state_set "$component" fail path-exists-but-invalid
+      return 1
+    fi
   fi
 
-  if [[ ! -d "$PROJECTYING_DIR" ]]; then
+  if [[ ! -d "$PROJECTYING_DIR/.git" ]]; then
     mkdir -p "$AITERMUX_HOME" >/dev/null 2>&1 || true
     log "git clone component=${component} repo=${PROJECTYING_REPO}"
     if ! git clone "$PROJECTYING_REPO" "$PROJECTYING_DIR"; then
@@ -720,6 +764,11 @@ ensure_projectying() {
   fi
 
   if [[ ! -f "$PROJECTYING_DIR/run.sh" ]]; then
+    if repair_git_component_missing_runsh "$component" "$PROJECTYING_DIR" "$PROJECTYING_REPO"; then
+      chmod u+x "$PROJECTYING_DIR/run.sh" >/dev/null 2>&1 || true
+      state_set "$component" ok repaired
+      return 0
+    fi
     log "component=${component} missing run.sh after clone"
     state_set "$component" fail missing-runsh
     return 1
@@ -746,9 +795,11 @@ ensure_projectling() {
   }
 
   if [[ -e "$PROJECTLING_DIR" && ! -d "$PROJECTLING_DIR/.git" ]] && ! projectling_dir_is_aidebug_only; then
-    log "component=${component} path-exists-but-invalid path=$PROJECTLING_DIR"
-    state_set "$component" fail path-exists-but-invalid
-    return 1
+    if ! backup_invalid_component_dir "$PROJECTLING_DIR" "$component"; then
+      log "component=${component} path-exists-but-invalid path=$PROJECTLING_DIR"
+      state_set "$component" fail path-exists-but-invalid
+      return 1
+    fi
   fi
 
   if [[ ! -d "$PROJECTLING_DIR/.git" ]]; then
@@ -761,6 +812,11 @@ ensure_projectling() {
   fi
 
   if [[ ! -f "$PROJECTLING_DIR/run.sh" ]]; then
+    if repair_git_component_missing_runsh "$component" "$PROJECTLING_DIR" "$PROJECTLING_REPO"; then
+      chmod u+x "$PROJECTLING_DIR/run.sh" >/dev/null 2>&1 || true
+      state_set "$component" ok repaired
+      return 0
+    fi
     log "component=${component} missing run.sh after clone"
     state_set "$component" fail missing-runsh
     return 1
