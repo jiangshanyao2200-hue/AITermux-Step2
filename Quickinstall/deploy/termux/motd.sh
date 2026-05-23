@@ -3100,9 +3100,8 @@ motd_render_config_menu_screen() {
   local hint_row=0
   local row=0
   local line=''
-  local max_body_lines=1
-  local hidden_lines=0
-  local idx=0
+  local needed_body_lines=0
+  local needed_prompt_row=0
   local -a content_lines=("$@")
   local -a visible_lines=()
 
@@ -3113,29 +3112,34 @@ motd_render_config_menu_screen() {
   content_start_row="${MOTD_MENU_FIRST_ITEM_ROW:-$((top_row + 2))}"
   divider_row="${MOTD_MENU_DIVIDER_ROW:-$((rows - 5))}"
   hint_row="${MOTD_MENU_HINT_ROW:-$((rows - 3))}"
-  max_body_lines=$((divider_row - content_start_row))
-  if [ "$max_body_lines" -lt 1 ] 2>/dev/null; then
-    max_body_lines=1
-  fi
 
-  if [ "${#content_lines[@]}" -gt "$max_body_lines" ] 2>/dev/null; then
-    if [ "$max_body_lines" -ge 2 ] 2>/dev/null; then
-      for ((idx=0; idx<max_body_lines-1; idx++)); do
-        visible_lines+=("${content_lines[$idx]}")
-      done
-      hidden_lines=$(( ${#content_lines[@]} - max_body_lines + 1 ))
-      visible_lines+=("  ${MOTD_MENU_FG_CYAN_DIM}… 窗口高度不足，已隐藏 ${hidden_lines} 行${MOTD_MENU_RESET}")
-    else
-      visible_lines=("  ${MOTD_MENU_FG_CYAN_DIM}… 内容过多，请缩减后重试${MOTD_MENU_RESET}")
+  needed_body_lines="${#content_lines[@]}"
+  [ "$needed_body_lines" -ge 1 ] 2>/dev/null || needed_body_lines=1
+  needed_prompt_row=$((content_start_row + needed_body_lines + 4))
+  if [ "$needed_prompt_row" -gt "$rows" ] 2>/dev/null; then
+    top_row=2
+    content_start_row=3
+    if [ "$rows" -le 12 ] 2>/dev/null; then
+      top_row=1
+      content_start_row=2
     fi
-  else
-    visible_lines=("${content_lines[@]}")
   fi
+  visible_lines=("${content_lines[@]}")
+  divider_row=$((content_start_row + needed_body_lines))
+  hint_row=$((divider_row + 1))
+  MOTD_MENU_STATUS_ROW=$((hint_row + 1))
+  MOTD_MENU_PROMPT_ROW=$((MOTD_MENU_STATUS_ROW + 1))
+  MOTD_MENU_AFTER_ROW=$((MOTD_MENU_PROMPT_ROW + 1))
+  MOTD_MENU_TOP_ROW="$top_row"
+  MOTD_MENU_FIRST_ITEM_ROW="$content_start_row"
+  MOTD_MENU_DIVIDER_ROW="$divider_row"
+  MOTD_MENU_HINT_ROW="$hint_row"
+  MOTD_MENU_CURSOR_ROW="$MOTD_MENU_PROMPT_ROW"
 
   motd_render_launcher_menu_text_row "$top_row" "$MOTD_MENU_DECO"
   motd_clear_row_at $((top_row + 1))
   motd_clear_row_range "$content_start_row" "$divider_row"
-  motd_clear_row_range "$((divider_row + 1))" "${MOTD_MENU_AFTER_ROW:-$rows}"
+  motd_clear_row_range "$((divider_row + 1))" "${MOTD_MENU_AFTER_ROW:-$((rows + 1))}"
   row="$content_start_row"
   for line in "${visible_lines[@]}"; do
     motd_render_launcher_menu_text_row "$row" "$line"
