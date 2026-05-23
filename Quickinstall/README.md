@@ -50,7 +50,7 @@ bash install.sh --quiet
 
 - 需要已安装 `zsh`；安装器会校验 `$PREFIX/bin/zsh`，缺失时直接报错，避免菜单结束后落到 bash。
 - `projectying / projectling` 走独立仓库路线；默认仓库为 `projectying-termux` / `projectling-termux`，可用 `AITERMUX_PROJECTYING_REPO`、`AITERMUX_PROJECTLING_REPO` 覆盖。
-- `codex / gemini / claude` 缺失时会在点击对应入口时由 bootstrap 自动安装 npm CLI 和 Termux 包装层。也可以手动执行 `aitermux-cli-install codex|gemini|claude|all`。
+- `codex / gemini / claude` 缺失时会在点击对应入口时由 bootstrap 自动安装 npm CLI 和 Termux 包装层。也可以手动执行 `aitermux-cli-install codex|gemini|claude|update-aitermux|update-projects|all`。
 
 ## 启动菜单（登录后）
 
@@ -77,13 +77,13 @@ bash install.sh --quiet
 
 - `PROJECT凌设置`：直接进入 `projectling` 的统一设置页
 - `启动项管理`：添加、移除、重命名或改路径；自定义项持久化在 `~/.state/motd/launchers.tsv`
-- `检测 PROJECT萤 更新` / `检测 PROJECT凌 更新`：检查远端仓库是否有新提交，有则 fast-forward 拉取源码
+- `检测 AITermux 更新` / `检测 PROJECT萤 更新` / `检测 PROJECT凌 更新`：检查远端仓库是否有新提交，有则 fast-forward 拉取源码
 
 如果入口缺失，选中后按 Enter 时才会触发安装：
 
 - 点击 `PROJECT 萤`：如果本地缺少，会从 `projectying-termux` clone；已有本地目录则不会覆盖
 - 打开 `PROJECT凌设置`：如果本地缺少 `projectling`，会从 `projectling-termux` clone
-- 点击 `CODEX`：自动安装官方 `@openai/codex`，直接使用 `$PREFIX/bin/codex`；验证只检查 npm 包、入口文件和 package 版本，不实际启动 Codex
+- 点击 `CODEX`：自动安装官方 `@openai/codex`，并补齐 `@openai/codex-linux-arm64` / `@openai/codex-linux-x64` 原生组件；验证命令、入口文件和 native vendor binary，不再把缺少 optional dependency 误判为安装成功
 - 点击 `Gemini`：自动安装 `@google/gemini-cli`，并写入 `~/.local/bin/gemini`。Termux Android 下会跳过安装脚本，避免 `keytar/node-pty` 触发无效的 Android NDK 编译报错；安装后用 `gemini --version` 做启动验证。
 - 点击 `Claude Code`：自动安装官方 `@anthropic-ai/claude-code`；Termux Android 没有官方原生 target 时，会补装 Alpine proot 与 `@anthropic-ai/claude-code-linux-arm64-musl`，并写入 `~/.local/bin/claude`。安装后用 `claude --version` 做启动验证，只有可运行才写入 ok 状态。
 

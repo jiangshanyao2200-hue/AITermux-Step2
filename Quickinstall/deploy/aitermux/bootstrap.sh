@@ -3,6 +3,7 @@ set -euo pipefail
 
 AITERMUX_HOME="${AITERMUX_HOME:-$HOME/AItermux}"
 PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
+AITERMUX_REPO="${AITERMUX_REPO:-https://github.com/jiangshanyao2200-hue/longgu-termux-kit-step2.git}"
 PROJECTYING_DIR="$AITERMUX_HOME/projectying"
 PROJECTLING_DIR="$AITERMUX_HOME/projectling"
 PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/projectying-termux.git}"
@@ -24,12 +25,12 @@ usage() {
 AITermux bootstrap
 
 用法：
-  aitermux-bootstrap [--quiet] [--force] [--update] [--component projectying|projectling|codex|gemini|claude]
+  aitermux-bootstrap [--quiet] [--force] [--update] [--component aitermux|projectying|projectling|codex|gemini|claude]
 
 说明：
   默认会检查并补装 projectying、projectling、codex、gemini、claude。
   projectying/projectling 默认从公开 Termux 仓库 clone；可用 AITERMUX_PROJECTYING_REPO / AITERMUX_PROJECTLING_REPO 覆盖。
-  --update 只对 projectying/projectling 生效：检查远端 main 是否有新提交，有就 fast-forward 拉取源码。
+  --update 对 aitermux/projectying/projectling 生效：检查远端 main 是否有新提交，有就 fast-forward 拉取源码。
   失败会写入 ~/AItermux/aidebug/logs/startup.log，并做短暂退避，避免每次登录都重复阻塞。
 EOF
 }
@@ -199,6 +200,94 @@ ensure_codex_stack() {
   ensure_node_stack || return 1
 }
 
+codex_platform_package() {
+  local arch=""
+  arch="$(node -p 'process.arch' 2>/dev/null || true)"
+  case "$arch" in
+    arm64) printf '%s\n' '@openai/codex-linux-arm64' ;;
+    x64) printf '%s\n' '@openai/codex-linux-x64' ;;
+    *)
+      log "component=codex verify-failed reason=unsupported-node-arch arch=${arch:-unknown}"
+      return 1
+      ;;
+  esac
+}
+
+codex_native_binary_path() {
+  local arch=""
+  arch="$(node -p 'process.arch' 2>/dev/null || true)"
+  case "$arch" in
+    arm64) printf '%s\n' "$PREFIX_DIR/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex" ;;
+    x64) printf '%s\n' "$PREFIX_DIR/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex" ;;
+    *) return 1 ;;
+  esac
+}
+
+codex_package_version() {
+  local package_json="$PREFIX_DIR/lib/node_modules/@openai/codex/package.json"
+  node -e 'const p=require(process.argv[1]); process.stdout.write(String(p.version || ""))' "$package_json" 2>/dev/null || true
+}
+
+install_codex_native_package() {
+  local version="$1"
+  local platform_pkg=""
+  local arch=""
+
+  platform_pkg="$(codex_platform_package)" || return 1
+  arch="$(node -p 'process.arch' 2>/dev/null || true)"
+  [ -n "$version" ] || return 1
+
+  case "$arch" in
+    arm64|x64) ;;
+    *) return 1 ;;
+  esac
+
+  log "npm install component=codex package=${platform_pkg} alias=@openai/codex@${version}-linux-${arch}"
+  npm install -g --force --include=optional --ignore-scripts=false \
+    "${platform_pkg}@npm:@openai/codex@${version}-linux-${arch}"
+}
+
+write_codex_wrapper() {
+  write_file_atomically "$HOME/.local/bin/codex" 0755 <<'EOF'
+#!/data/data/com.termux/files/usr/bin/env bash
+set -euo pipefail
+
+PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
+REAL_CODEX="${PREFIX_DIR}/bin/codex"
+CODEX_JS="${PREFIX_DIR}/lib/node_modules/@openai/codex/bin/codex.js"
+
+arch="$(node -p 'process.arch' 2>/dev/null || true)"
+case "$arch" in
+  arm64)
+    native="${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex"
+    platform_pkg='@openai/codex-linux-arm64'
+    ;;
+  x64)
+    native="${PREFIX_DIR}/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex"
+    platform_pkg='@openai/codex-linux-x64'
+    ;;
+  *)
+    printf 'CODEX 无法启动：当前 Node 架构不受支持：%s\n' "${arch:-unknown}" >&2
+    exit 127
+    ;;
+esac
+
+if [ ! -x "$REAL_CODEX" ] || [ ! -s "$CODEX_JS" ]; then
+  printf 'CODEX 尚未安装完整。请运行：aitermux-cli-install codex\n' >&2
+  exit 127
+fi
+
+if [ ! -x "$native" ]; then
+  printf 'CODEX 缺少原生组件：%s\n' "$platform_pkg" >&2
+  printf '请运行：aitermux-cli-install codex\n' >&2
+  exit 127
+fi
+
+export SSL_CERT_FILE="${SSL_CERT_FILE:-${PREFIX_DIR}/etc/tls/cert.pem}"
+exec "$REAL_CODEX" "$@"
+EOF
+}
+
 ensure_claude_stack() {
   ensure_node_stack || return 1
   ensure_pkg proot proot || return 1
@@ -300,6 +389,7 @@ verify_codex() {
   local version=""
   local codex_js="$PREFIX_DIR/lib/node_modules/@openai/codex/bin/codex.js"
   local package_json="$PREFIX_DIR/lib/node_modules/@openai/codex/package.json"
+  local platform_pkg="" native_binary=""
 
   if [[ ! -x "$PREFIX_DIR/bin/codex" ]]; then
     log "component=codex verify-failed reason=missing-command"
@@ -317,9 +407,19 @@ verify_codex() {
     log "component=codex verify-failed reason=missing-node"
     return 1
   fi
-  version="$(node -e 'const p=require(process.argv[1]); process.stdout.write(String(p.version || "unknown-version"))' "$package_json" 2>/dev/null || true)"
+  platform_pkg="$(codex_platform_package)" || return 1
+  native_binary="$(codex_native_binary_path || true)"
+  if [[ -z "$native_binary" || ! -x "$native_binary" ]]; then
+    log "component=codex verify-failed reason=missing-native package=${platform_pkg:-unknown}"
+    return 1
+  fi
+  if ! node -e 'const r=require("module").createRequire(process.argv[1]); r.resolve(process.argv[2] + "/package.json")' "$codex_js" "$platform_pkg" >/dev/null 2>&1; then
+    log "component=codex verify-failed reason=missing-native-package package=${platform_pkg}"
+    return 1
+  fi
+  version="$(codex_package_version)"
   [[ -n "$version" ]] || version="unknown-version"
-  log "component=codex verify-ok method=static package_version=${version}"
+  log "component=codex verify-ok method=native package_version=${version} native=${platform_pkg}"
   return 0
 }
 
@@ -438,6 +538,17 @@ update_git_project() {
   }
   after="$(git_local_head "$dir")"
   log "component=${component} update-ok before=${before:0:12} after=${after:0:12}"
+  if [[ "$component" == "aitermux" ]]; then
+    if [[ -x "$AITERMUX_HOME/Quickinstall/install.sh" ]]; then
+      log "component=aitermux deploy-updated-quickinstall"
+      if ! bash "$AITERMUX_HOME/Quickinstall/install.sh" --quiet; then
+        state_set "$component" fail deploy-failed
+        return 1
+      fi
+    else
+      log "component=aitermux deploy-skipped reason=missing-install-sh"
+    fi
+  fi
   state_set "$component" ok updated
   return 0
 }
@@ -528,8 +639,10 @@ ensure_projectling() {
 ensure_codex() {
   local component="codex"
   local codex_js="$PREFIX_DIR/lib/node_modules/@openai/codex/bin/codex.js"
+  local version=""
 
   if [[ -f "$codex_js" ]]; then
+    write_codex_wrapper || true
     if verify_codex; then
       state_set "$component" ok present
       return 0
@@ -545,12 +658,27 @@ ensure_codex() {
   append_line_if_missing "$HOME/.npmrc" "foreground-scripts=true"
 
   if [[ ! -f "$codex_js" ]]; then
-    log "npm install component=${component} package=@openai/codex"
-    if ! npm install -g @openai/codex; then
+    log "npm install component=${component} package=@openai/codex include=optional"
+    if ! npm install -g --include=optional --ignore-scripts=false @openai/codex@latest; then
       state_set "$component" fail npm-install-failed
       return 1
     fi
   fi
+
+  version="$(codex_package_version)"
+  if ! verify_codex; then
+    if [[ -n "$version" ]]; then
+      install_codex_native_package "$version" || {
+        state_set "$component" fail native-install-failed
+        return 1
+      }
+    fi
+  fi
+
+  write_codex_wrapper || {
+    state_set "$component" fail wrapper-write-failed
+    return 1
+  }
 
   verify_codex || {
     state_set "$component" fail verify-failed
@@ -664,6 +792,9 @@ run_component() {
 
   if (( UPDATE == 1 )); then
     case "$component" in
+      aitermux)
+        update_git_project aitermux "$AITERMUX_HOME" "$AITERMUX_REPO"
+        ;;
       projectying)
         ensure_projectying || return 1
         update_git_project projectying "$PROJECTYING_DIR" "$PROJECTYING_REPO"
@@ -727,7 +858,7 @@ done
 
 if ((${#COMPONENTS[@]} == 0)); then
   if (( UPDATE == 1 )); then
-    COMPONENTS=(projectying projectling)
+    COMPONENTS=(aitermux projectying projectling)
   else
     COMPONENTS=(projectying projectling codex gemini claude)
   fi

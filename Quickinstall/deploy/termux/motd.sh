@@ -1695,6 +1695,7 @@ motd_bootstrap_path() {
 
 motd_bootstrap_component_label() {
   case "${1:-}" in
+    aitermux) printf '%s\n' 'AITermux' ;;
     codex) printf '%s\n' 'CODEX' ;;
     gemini) printf '%s\n' 'Gemini' ;;
     claude) printf '%s\n' 'Claude Code' ;;
@@ -1718,6 +1719,46 @@ motd_bootstrap_latest_line() {
   line="$(awk 'NF { line=$0 } END { print line }' "$log_file" 2>/dev/null | tail -n 1)"
   line="$(printf '%s' "$line" | sed -E $'s/\033\\[[0-9;?]*[ -/]*[@-~]//g' 2>/dev/null)"
   line="$(printf '%s' "$line" | tr -d '\000-\010\013\014\016-\037\177' 2>/dev/null)"
+  line="${line#\[aitermux-bootstrap\] }"
+  line="${line#* bootstrap }"
+  case "$line" in
+    npm\ install\ component=codex\ package=@openai/codex-linux-*)
+      line="正在补齐 CODEX 原生组件"
+      ;;
+    npm\ install\ component=codex\ package=@openai/codex*)
+      line="正在安装 CODEX 主程序"
+      ;;
+    npm\ install\ component=gemini*)
+      line="正在安装 Gemini CLI"
+      ;;
+    npm\ install\ component=claude*)
+      line="正在安装 Claude Code"
+      ;;
+    git\ clone\ component=projectying*)
+      line="正在拉取 PROJECT萤"
+      ;;
+    git\ clone\ component=projectling*)
+      line="正在拉取 PROJECT凌"
+      ;;
+    component=aitermux\ update-none*)
+      line="AITermux 已是最新版本"
+      ;;
+    component=aitermux\ update-ok*)
+      line="AITermux 更新完成"
+      ;;
+    component=projectying\ update-none*)
+      line="PROJECT萤 已是最新版本"
+      ;;
+    component=projectying\ update-ok*)
+      line="PROJECT萤 更新完成"
+      ;;
+    component=projectling\ update-none*)
+      line="PROJECT凌 已是最新版本"
+      ;;
+    component=projectling\ update-ok*)
+      line="PROJECT凌 更新完成"
+      ;;
+  esac
   motd_sanitize_field "$line"
 }
 
@@ -1842,7 +1883,12 @@ motd_has_projectying() {
 
 motd_has_codex() {
   [ -x "$PREFIX/bin/codex" ] || return 1
-  [ -f "$PREFIX/lib/node_modules/@openai/codex/bin/codex.js" ]
+  [ -f "$PREFIX/lib/node_modules/@openai/codex/bin/codex.js" ] || return 1
+  case "$(node -p 'process.arch' 2>/dev/null || true)" in
+    arm64) [ -x "$PREFIX/lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex" ] ;;
+    x64) [ -x "$PREFIX/lib/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex/codex" ] ;;
+    *) return 1 ;;
+  esac
 }
 
 motd_has_gemini() {
@@ -3370,7 +3416,7 @@ motd_run_launcher_remove_menu() {
   done
 }
 
-motd_run_project_update() {
+motd_run_component_update() {
   local component="$1"
 
   motd_bootstrap_component_now "$component" update || true
@@ -3382,7 +3428,7 @@ motd_run_system_menu() {
   local selected=1
 
   MOTD_REQUEST_SHELL_EXIT=0
-  MOTD_CONFIG_TOTAL=5
+  MOTD_CONFIG_TOTAL=6
   MOTD_CONFIG_SELECTED="$(motd_clamp_menu_selection "${MOTD_CONFIG_SELECTED:-1}" "$MOTD_CONFIG_TOTAL")"
   motd_input_reset config_select
   while :; do
@@ -3398,7 +3444,8 @@ motd_run_system_menu() {
         "$(motd_config_item_line "$selected" 2 '开屏动画速度')" \
         "$(motd_config_item_line "$selected" 3 'PROJECT凌设置')" \
         "$(motd_config_item_line "$selected" 4 '检测 PROJECT萤 更新')" \
-        "$(motd_config_item_line "$selected" 5 '检测 PROJECT凌 更新')"
+        "$(motd_config_item_line "$selected" 5 '检测 PROJECT凌 更新')" \
+        "$(motd_config_item_line "$selected" 6 '检测 AITermux 更新')"
       motd_place_input_cursor "${MOTD_INPUT_VALUE:-}"
       last_size="$current_size"
       last_key="$current_key"
@@ -3440,12 +3487,17 @@ motd_run_system_menu() {
         redraw_needed=1
         ;;
       submit:4)
-        motd_run_project_update projectying
+        motd_run_component_update projectying
         motd_input_reset config_select
         redraw_needed=1
         ;;
       submit:5)
-        motd_run_project_update projectling
+        motd_run_component_update projectling
+        motd_input_reset config_select
+        redraw_needed=1
+        ;;
+      submit:6)
+        motd_run_component_update aitermux
         motd_input_reset config_select
         redraw_needed=1
         ;;

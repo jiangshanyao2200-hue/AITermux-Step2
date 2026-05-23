@@ -48,7 +48,7 @@ bash install.sh
 - `1` / `2` / `3` ...：输入序号直达启动项
 - `Enter`：启动当前选中项
 - `Esc`：跳过菜单，直接进入 shell
-- `PROJECT凌设置`：进入启动项、动画速度和 Project凌 设置
+- `PROJECT凌设置`：进入启动项、动画速度、Project凌 设置和更新检测
 
 内置入口：
 
@@ -67,7 +67,7 @@ bash install.sh
 
 - `projectying`：缺失时从 `projectying-termux` clone，更新走 `git pull --ff-only`
 - `projectling`：缺失时从 `projectling-termux` clone，更新走 `git pull --ff-only`
-- `codex`：通过 npm 全局安装 `@openai/codex`，验证 npm 包、入口文件和 package 版本，不实际启动 Codex
+- `codex`：通过 npm 全局安装 `@openai/codex`，并补齐 `@openai/codex-linux-arm64` / `@openai/codex-linux-x64` 原生组件；验证命令、入口文件和 native vendor binary
 - `gemini`：通过 npm 全局安装 `@google/gemini-cli`，写入 Termux 包装器，并用 `gemini --version` 验证
 - `claude`：安装 `@anthropic-ai/claude-code`，必要时补装 Alpine proot 与 `@anthropic-ai/claude-code-linux-arm64-musl`，并用 `claude --version` 验证
 
@@ -77,6 +77,7 @@ bash install.sh
 aitermux-cli-install codex
 aitermux-cli-install gemini
 aitermux-cli-install claude
+aitermux-cli-install update-aitermux
 aitermux-cli-install update-projects
 ```
 
