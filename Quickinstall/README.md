@@ -30,7 +30,6 @@ bash install.sh
 
 ```bash
 bash install.sh --dry-run
-bash install.sh --skip-preview
 bash install.sh --quiet
 ```
 
@@ -39,43 +38,62 @@ bash install.sh --quiet
 - `deploy/termux/`：覆盖到 Termux 启动链路文件（`motd.sh` / `login` / `etc/motd.sh` / `etc/termux-login.sh` / `tx11start`）与配置（`termux.properties`）；安装时还会把 `~/.termux/shell` 设为 `$PREFIX/bin/zsh`，确保 `motd` 菜单结束后进入正常 zsh。
 - `deploy/aitermux/`：安装启动器、bootstrap，以及保留给 zsh 的占位片段；Launcher 菜单本体已经回收到 `motd.sh`。
 - `deploy/startboot/`：开屏动画脚本池；所有可执行 `*.sh` 都会进入随机播放池。
+- `deploy/aitermux/bin/`：安装到 `~/AItermux/bin/`，包含 `codexurl`、`codexDNS`、`aitermux-cli-install` 等 AITermux 本地工具。
 
 安装器职责边界：
 
-- 安装阶段只部署 AITermux 外壳层，不主动拉取 `projectying`
-- 安装阶段不主动安装 `codex / gemini`
+- 安装阶段部署 AITermux 外壳层，并通过 bootstrap 按需拉取 `projectling / projectying` 源码。
+- 安装阶段不主动安装 `codex / gemini / claude`
 - 缺失运行时的自动补装，只在用户点击对应 Launcher 入口时触发
 
 前提：
 
 - 需要已安装 `zsh`；安装器会校验 `$PREFIX/bin/zsh`，缺失时直接报错，避免菜单结束后落到 bash。
-- `projectying` 不再要求随 kit2 完整提交；默认缺失时会在点击 `PROJECT 萤` 时从 `https://github.com/jiangshanyao2200-hue/projectying.git` 自动 clone。
-- `codex / gemini` 缺失时会在点击对应入口时由 bootstrap 自动安装 npm CLI 和 Termux 包装层。
+- `projectying / projectling` 走独立仓库路线；默认仓库为 `projectying-termux` / `projectling-termux`，可用 `AITERMUX_PROJECTYING_REPO`、`AITERMUX_PROJECTLING_REPO` 覆盖。
+- `codex / gemini / claude` 缺失时会在点击对应入口时由 bootstrap 自动安装 npm CLI 和 Termux 包装层。也可以手动执行 `aitermux-cli-install codex|gemini|claude|all`。
 
 ## 启动菜单（登录后）
 
 安装完成后，重新打开 Termux（或新建 session）会先播放随机 `startboot` 动画，再落到 `motd` 里的交互式 `TERMUX LAUNCHER` 菜单：
 
 - `↑↓`：上下选择
+- `1` / `2` / `3` ...：也可以直接在输入框输入序号
 - `Enter`：启动当前选中项
 - `Esc`：跳过菜单，直接进入 shell
+- `PROJECT凌设置`：进入 `motd` 系统配置项
 
 入口仍然是：
 
 - `1`：启动 `PROJECT 萤`（`~/AItermux/projectying/run.sh`）
 - `2`：启动 `CODEX`（`codex`）
 - `3`：启动 `Gemini`（`gemini`）
-- `4`：启动 `Xfce 图形界面`（`tx11start`）
+- `4`：启动 `Claude Code`（`claude`）
+- `启动 Xfce 图形界面`（`tx11start`）
+- `PROJECT凌设置`
 
 启动项会在当前 `motd` 页面下方继续执行；程序退出后，再落到正常 zsh。
 
+`PROJECT凌设置` 打开的系统配置菜单当前支持：
+
+- `PROJECT凌设置`：直接进入 `projectling` 的统一设置页
+- `启动项管理`：添加、移除、重命名或改路径；自定义项持久化在 `~/.state/motd/launchers.tsv`
+- `检测 PROJECT萤 更新` / `检测 PROJECT凌 更新`：检查远端仓库是否有新提交，有则 fast-forward 拉取源码
+
 如果入口缺失，选中后按 Enter 时才会触发安装：
 
-- 点击 `PROJECT 萤`：自动 clone 独立仓库
-- 点击 `CODEX`：自动安装 `@openai/codex`，并写入 `~/.local/bin/codex` 与 `~/.codex/termux_env.sh`
-- 点击 `Gemini`：自动安装 `@google/gemini-cli`，并写入 `~/.local/bin/gemini`
+- 点击 `PROJECT 萤`：如果本地缺少，会从 `projectying-termux` clone；已有本地目录则不会覆盖
+- 打开 `PROJECT凌设置`：如果本地缺少 `projectling`，会从 `projectling-termux` clone
+- 点击 `CODEX`：自动安装官方 `@openai/codex`，直接使用 `$PREFIX/bin/codex`；验证只检查 npm 包、入口文件和 package 版本，不实际启动 Codex
+- 点击 `Gemini`：自动安装 `@google/gemini-cli`，并写入 `~/.local/bin/gemini`。Termux Android 下会跳过安装脚本，避免 `keytar/node-pty` 触发无效的 Android NDK 编译报错；安装后用 `gemini --version` 做启动验证。
+- 点击 `Claude Code`：自动安装官方 `@anthropic-ai/claude-code`；Termux Android 没有官方原生 target 时，会补装 Alpine proot 与 `@anthropic-ai/claude-code-linux-arm64-musl`，并写入 `~/.local/bin/claude`。安装后用 `claude --version` 做启动验证，只有可运行才写入 ok 状态。
 
-安装失败不会阻塞进入菜单；错误会写进 `~/AItermux/logs/startup.log`，后续按退避策略重试。
+自动安装会在后台执行，`motd` 菜单底部状态行会显示当前组件、最近安装日志、完成或失败摘要；已安装的入口会直接启动，不再重复安装。
+
+`projectying` 是 Rust 源码项目，不走 npm。源码拉取或更新后，`run.sh` 会在首次打开或源码变更时自动执行 `cargo build --release`。
+
+安装失败不会阻塞进入菜单；错误会写进 `~/AItermux/aidebug/logs/startup.log`，后续按退避策略重试。
+
+日志不会无限增长：motd、zshrc、bootstrap、projectling 会按大小保留最近尾部日志，并按天数清理 `aidebug/tmp` 和 ProjectLing terminal 临时输出；`notes/`、`backup/`、`legacy/` 默认不会自动删除。
 
 ## 运行时可调参数（开屏动画）
 
@@ -97,5 +115,5 @@ bash install.sh --quiet
 ## 安装可视化与回滚
 
 - 每次安装会创建备份目录：`~/AItermux/backups/upgrade-YYYYMMDD-HHMMSS/`
-- 安装过程会输出每一步，并写入日志：`install.log`
+- 安装过程会输出每一步，并同时写入备份目录的 `install.log` 与 `~/AItermux/aidebug/logs/install.log`
 - 回滚脚本：`rollback.sh`（把备份文件复制回原路径）

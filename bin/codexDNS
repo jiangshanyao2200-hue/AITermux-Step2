@@ -1,0 +1,628 @@
+#!/data/data/com.termux/files/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import http.client
+import os
+import signal
+import socket
+import ssl
+import subprocess
+import sys
+import threading
+import time
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+
+
+DEFAULT_LISTEN = "127.0.0.1"
+DEFAULT_PORT = 18083
+DEFAULT_UPSTREAM_URL = "https://api.rainp.xyz/v1"
+DEFAULT_LISTEN_BASE = "/v"
+DEFAULT_RAINP_CONNECT_IPS = ("172.67.164.100", "104.21.66.215")
+DEFAULT_RESOLVE_TTL = 30.0
+DEFAULT_FAILURE_COOLDOWN = 20.0
+COMMANDS = ("serve", "start", "stop", "restart", "status")
+
+PID_FILE = Path(os.environ.get("CODEXDNS_PID_FILE", str(Path.home() / ".codex" / "codexDNS.pid")))
+LOG_FILE = Path(os.environ.get("CODEXDNS_LOG_FILE", str(Path.home() / ".codex" / "log" / "codexDNS.log")))
+
+HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+
+_SSL_CONTEXT = ssl.create_default_context()
+
+
+@dataclass(frozen=True)
+class UpstreamConfig:
+    scheme: str
+    host: str
+    port: int
+    base_path: str
+    fallback_targets: tuple[str, ...]
+    dynamic_resolve: bool
+
+
+class UpstreamTargetPool:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        fallback_targets: tuple[str, ...],
+        dynamic_resolve: bool,
+        resolve_ttl: float,
+        failure_cooldown: float,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.fallback_targets = fallback_targets
+        self.dynamic_resolve = dynamic_resolve
+        self.resolve_ttl = max(1.0, resolve_ttl)
+        self.failure_cooldown = max(0.0, failure_cooldown)
+        self._lock = threading.Lock()
+        self._targets: tuple[str, ...] = fallback_targets
+        self._expires_at = 0.0
+        self._failure_until: dict[str, float] = {}
+        self._last_resolve_error: Exception | None = None
+
+    def get_targets(self, force_refresh: bool = False) -> tuple[str, ...]:
+        now = time.monotonic()
+        with self._lock:
+            if self.dynamic_resolve and (force_refresh or now >= self._expires_at or not self._targets):
+                self._refresh_locked(now)
+
+            targets = list(self._targets)
+            if not targets:
+                targets = [self.host]
+
+            healthy = [target for target in targets if self._failure_until.get(target, 0.0) <= now]
+            cooling = [target for target in targets if self._failure_until.get(target, 0.0) > now]
+            if healthy:
+                return tuple(healthy + cooling)
+            return tuple(sorted(cooling, key=lambda target: self._failure_until.get(target, 0.0)))
+
+    def mark_success(self, target: str) -> None:
+        with self._lock:
+            self._failure_until.pop(target, None)
+
+    def mark_failure(self, target: str, _error: Exception) -> None:
+        if self.failure_cooldown <= 0:
+            return
+        with self._lock:
+            self._failure_until[target] = time.monotonic() + self.failure_cooldown
+
+    def last_resolve_error(self) -> Exception | None:
+        with self._lock:
+            return self._last_resolve_error
+
+    def _refresh_locked(self, now: float) -> None:
+        resolved: list[str] = []
+        try:
+            for info in socket.getaddrinfo(self.host, self.port, type=socket.SOCK_STREAM):
+                target = info[4][0]
+                if target not in resolved:
+                    resolved.append(target)
+            self._last_resolve_error = None
+        except Exception as exc:
+            self._last_resolve_error = exc
+
+        for target in self.fallback_targets:
+            if target not in resolved:
+                resolved.append(target)
+
+        if resolved:
+            self._targets = tuple(resolved)
+        self._expires_at = now + self.resolve_ttl
+
+
+def tune_tcp_socket(sock: socket.socket) -> socket.socket:
+    for level, option, value in (
+        (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
+        (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+    ):
+        try:
+            sock.setsockopt(level, option, value)
+        except OSError:
+            pass
+    return sock
+
+
+class FixedTargetHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host: str, port: int, connect_host: str, timeout: float) -> None:
+        super().__init__(host=host, port=port, timeout=timeout)
+        self._connect_host = connect_host
+
+    def connect(self) -> None:
+        target = self._connect_host or self.host
+        self.sock = tune_tcp_socket(socket.create_connection((target, self.port), self.timeout))
+
+
+class FixedTargetHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, port: int, connect_host: str, timeout: float) -> None:
+        super().__init__(host=host, port=port, timeout=timeout)
+        self._connect_host = connect_host
+
+    def connect(self) -> None:
+        target = self._connect_host or self.host
+        raw_sock = tune_tcp_socket(socket.create_connection((target, self.port), self.timeout))
+        self.sock = _SSL_CONTEXT.wrap_socket(raw_sock, server_hostname=self.host)
+
+
+def parse_upstream_url(raw: str) -> tuple[str, str, int, str]:
+    parsed = urlsplit(raw.strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise SystemExit(f"unsupported upstream scheme in {raw!r}")
+    if not parsed.hostname:
+        raise SystemExit(f"invalid upstream url: {raw!r}")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    base_path = parsed.path or "/"
+    return parsed.scheme, parsed.hostname, port, base_path
+
+
+def format_host_for_header(host: str, scheme: str, port: int) -> str:
+    display_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    default_port = 443 if scheme == "https" else 80
+    if port == default_port:
+        return display_host
+    return f"{display_host}:{port}"
+
+
+def join_url_path(base: str, suffix: str) -> str:
+    base = normalize_base_path(base)
+    if not suffix:
+        return base
+    if base == "/":
+        return suffix if suffix.startswith("/") else "/" + suffix
+    return base + (suffix if suffix.startswith("/") else "/" + suffix)
+
+
+def parse_connect_targets(host: str, _port: int, explicit: str | None) -> tuple[tuple[str, ...], bool]:
+    if explicit:
+        targets = [item.strip() for item in explicit.split(",") if item.strip()]
+        if not targets:
+            raise SystemExit("at least one upstream IP is required")
+        return tuple(targets), False
+
+    if host == "api.rainp.xyz":
+        return DEFAULT_RAINP_CONNECT_IPS, True
+
+    return (), True
+
+
+class CodexDnsHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "codexDNS/1.0"
+
+    def do_GET(self) -> None:
+        self._proxy()
+
+    def do_POST(self) -> None:
+        self._proxy()
+
+    def do_PUT(self) -> None:
+        self._proxy()
+
+    def do_PATCH(self) -> None:
+        self._proxy()
+
+    def do_DELETE(self) -> None:
+        self._proxy()
+
+    def do_OPTIONS(self) -> None:
+        self._proxy()
+
+    def do_HEAD(self) -> None:
+        self._proxy()
+
+    def _proxy(self) -> None:
+        body = self._read_request_body()
+        upstream_path = self._target_path()
+        upstream_headers = self._upstream_headers(body)
+        upstream = self.server.upstream_config  # type: ignore[attr-defined]
+        target_pool = self.server.target_pool  # type: ignore[attr-defined]
+
+        response = None
+        response_target: str | None = None
+        last_error: Exception | None = None
+        attempted_targets: set[str] = set()
+        for refresh in (False, True):
+            for target in target_pool.get_targets(force_refresh=refresh):
+                if target in attempted_targets:
+                    continue
+                attempted_targets.add(target)
+                if upstream.scheme == "https":
+                    conn = FixedTargetHTTPSConnection(
+                        host=upstream.host,
+                        port=upstream.port,
+                        connect_host=target,
+                        timeout=self.server.timeout_seconds,  # type: ignore[attr-defined]
+                    )
+                else:
+                    conn = FixedTargetHTTPConnection(
+                        host=upstream.host,
+                        port=upstream.port,
+                        connect_host=target,
+                        timeout=self.server.timeout_seconds,  # type: ignore[attr-defined]
+                    )
+                try:
+                    conn.request(self.command, upstream_path, body=body, headers=upstream_headers)
+                    response = conn.getresponse()
+                    response_target = target
+                    target_pool.mark_success(target)
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    target_pool.mark_failure(target, exc)
+                    self.log_message("upstream connect failed target=%s error=%r", target, exc)
+                    conn.close()
+            if response is not None:
+                break
+
+        if response is None:
+            extra = target_pool.last_resolve_error()
+            if extra is not None:
+                self.log_message("upstream DNS refresh failed error=%r", extra)
+            self._send_proxy_error(502, f"upstream connect failed: {last_error}")
+            return
+
+        self.close_connection = True
+        try:
+            try:
+                self.send_response_only(response.status, response.reason)
+                for key, value in response.getheaders():
+                    lower_key = key.lower()
+                    if lower_key in HOP_BY_HOP_HEADERS:
+                        continue
+                    self.send_header(key, value)
+                self.send_header("Connection", "close")
+                self.end_headers()
+            except OSError:
+                return
+
+            if self.command == "HEAD":
+                return
+
+            while True:
+                try:
+                    chunk = response.read(65536)
+                except http.client.IncompleteRead as exc:
+                    partial = exc.partial
+                    if partial:
+                        try:
+                            self.wfile.write(partial)
+                            self.wfile.flush()
+                        except OSError:
+                            pass
+                    self.log_message("upstream stream ended early target=%s error=%r", response_target, exc)
+                    target_pool.mark_failure(response_target or upstream.host, exc)
+                    break
+                except (TimeoutError, OSError, http.client.HTTPException) as exc:
+                    self.log_message("upstream stream failed target=%s error=%r", response_target, exc)
+                    if response_target is not None:
+                        target_pool.mark_failure(response_target, exc)
+                    break
+
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except OSError:
+                    break
+        finally:
+            response.close()
+
+    def _send_proxy_error(self, code: int, message: str) -> None:
+        try:
+            self.send_error(code, message)
+        except OSError:
+            pass
+
+    def _target_path(self) -> str:
+        if self.path.startswith(("http://", "https://")):
+            parsed = urlsplit(self.path)
+        else:
+            parsed = urlsplit(self.path or "/")
+
+        path = parsed.path or "/"
+        listen_base = self.server.listen_base  # type: ignore[attr-defined]
+        upstream_base = self.server.upstream_config.base_path  # type: ignore[attr-defined]
+        if listen_base == "/":
+            path = join_url_path(upstream_base, "" if path == "/" else path)
+        elif path == listen_base or path.startswith(listen_base + "/"):
+            path = join_url_path(upstream_base, path[len(listen_base):])
+
+        if parsed.query:
+            path += "?" + parsed.query
+        return path
+
+    def _read_request_body(self) -> bytes | None:
+        transfer_encoding = self.headers.get("Transfer-Encoding", "").lower()
+        if "chunked" in transfer_encoding:
+            return self._read_chunked_body()
+
+        content_length = self.headers.get("Content-Length")
+        if not content_length:
+            return None
+
+        try:
+            length = int(content_length)
+        except ValueError:
+            self.send_error(400, "bad Content-Length")
+            return b""
+        return self.rfile.read(length)
+
+    def _read_chunked_body(self) -> bytes:
+        body = bytearray()
+        while True:
+            line = self.rfile.readline(65536)
+            if not line:
+                break
+            raw_size = line.split(b";", 1)[0].strip()
+            size = int(raw_size, 16)
+            if size == 0:
+                while True:
+                    trailer = self.rfile.readline(65536)
+                    if trailer in (b"\r\n", b"\n", b""):
+                        break
+                break
+            body.extend(self.rfile.read(size))
+            self.rfile.read(2)
+        return bytes(body)
+
+    def _upstream_headers(self, body: bytes | None) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        for key, value in self.headers.items():
+            lower_key = key.lower()
+            if lower_key in {"host", "content-length"} or lower_key in HOP_BY_HOP_HEADERS:
+                continue
+            headers[key] = value
+
+        upstream = self.server.upstream_config  # type: ignore[attr-defined]
+        headers["Host"] = format_host_for_header(upstream.host, upstream.scheme, upstream.port)
+        headers["Connection"] = "close"
+        if body is not None:
+            headers["Content-Length"] = str(len(body))
+        return headers
+
+    def log_message(self, fmt: str, *args: object) -> None:
+        sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
+        sys.stderr.flush()
+
+
+class CodexDnsServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+    request_queue_size = 64
+    block_on_close = False
+
+
+def normalize_base_path(value: str) -> str:
+    base = value.strip()
+    if not base:
+        return "/"
+    if not base.startswith("/"):
+        base = "/" + base
+    if len(base) > 1 and base.endswith("/"):
+        base = base[:-1]
+    return base
+
+
+def build_upstream_config(args: argparse.Namespace) -> UpstreamConfig:
+    scheme, host, port, base_path = parse_upstream_url(args.upstream_url)
+    if args.upstream_host:
+        host = args.upstream_host
+    if args.upstream_port:
+        port = args.upstream_port
+    if args.upstream_base:
+        base_path = args.upstream_base
+
+    base_path = normalize_base_path(base_path)
+    fallback_targets, dynamic_resolve = parse_connect_targets(host, port, args.upstream_ips)
+    return UpstreamConfig(
+        scheme=scheme,
+        host=host,
+        port=port,
+        base_path=base_path,
+        fallback_targets=fallback_targets,
+        dynamic_resolve=dynamic_resolve,
+    )
+
+
+def display_upstream_url(upstream: UpstreamConfig) -> str:
+    host = format_host_for_header(upstream.host, upstream.scheme, upstream.port)
+    return f"{upstream.scheme}://{host}{upstream.base_path}"
+
+
+def build_server(args: argparse.Namespace) -> CodexDnsServer:
+    server = CodexDnsServer((args.listen, args.port), CodexDnsHandler)
+    server.upstream_config = build_upstream_config(args)
+    upstream = server.upstream_config
+    server.target_pool = UpstreamTargetPool(
+        host=upstream.host,
+        port=upstream.port,
+        fallback_targets=upstream.fallback_targets,
+        dynamic_resolve=upstream.dynamic_resolve,
+        resolve_ttl=args.resolve_ttl,
+        failure_cooldown=args.failure_cooldown,
+    )
+    server.listen_base = normalize_base_path(args.listen_base)
+    server.timeout_seconds = args.timeout
+    return server
+
+
+def serve(args: argparse.Namespace) -> int:
+    with build_server(args) as server:
+        upstream = server.upstream_config
+        target_pool = server.target_pool
+        targets = target_pool.get_targets(force_refresh=True)
+        mode = "dynamic" if upstream.dynamic_resolve else "static"
+        print(
+            f"codexDNS listening on http://{args.listen}:{args.port}{server.listen_base} "
+            f"-> {display_upstream_url(upstream)} via {mode} {','.join(targets)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        server.serve_forever()
+    return 0
+
+
+def read_pid() -> int | None:
+    try:
+        return int(PID_FILE.read_text().strip())
+    except Exception:
+        return None
+
+
+def is_running(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def start(args: argparse.Namespace) -> int:
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    pid = read_pid()
+    if is_running(pid):
+        print(f"codexDNS already running: pid={pid}")
+        return 0
+
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "serve",
+        "--listen",
+        args.listen,
+        "--port",
+        str(args.port),
+        "--listen-base",
+        args.listen_base,
+        "--upstream-url",
+        args.upstream_url,
+        "--timeout",
+        str(args.timeout),
+        "--resolve-ttl",
+        str(args.resolve_ttl),
+        "--failure-cooldown",
+        str(args.failure_cooldown),
+    ]
+    if args.upstream_host:
+        cmd.extend(["--upstream-host", args.upstream_host])
+    if args.upstream_port:
+        cmd.extend(["--upstream-port", str(args.upstream_port)])
+    if args.upstream_base:
+        cmd.extend(["--upstream-base", args.upstream_base])
+    if args.upstream_ips:
+        cmd.extend(["--upstream-ips", args.upstream_ips])
+
+    with LOG_FILE.open("ab") as log:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+
+    PID_FILE.write_text(str(proc.pid) + "\n")
+    time.sleep(0.5)
+    if is_running(proc.pid):
+        print(f"codexDNS started: pid={proc.pid}, url=http://{args.listen}:{args.port}{normalize_base_path(args.listen_base)}")
+        print(f"log: {LOG_FILE}")
+        return 0
+
+    PID_FILE.unlink(missing_ok=True)
+    print(f"codexDNS failed to start. See log: {LOG_FILE}", file=sys.stderr)
+    return 1
+
+
+def stop(_args: argparse.Namespace) -> int:
+    pid = read_pid()
+    if not is_running(pid):
+        PID_FILE.unlink(missing_ok=True)
+        print("codexDNS stopped")
+        return 0
+
+    assert pid is not None
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(20):
+        if not is_running(pid):
+            PID_FILE.unlink(missing_ok=True)
+            print("codexDNS stopped")
+            return 0
+        time.sleep(0.1)
+
+    os.kill(pid, signal.SIGKILL)
+    PID_FILE.unlink(missing_ok=True)
+    print("codexDNS killed")
+    return 0
+
+
+def status(args: argparse.Namespace) -> int:
+    pid = read_pid()
+    if is_running(pid):
+        print(f"codexDNS running: pid={pid}, url=http://{args.listen}:{args.port}{normalize_base_path(args.listen_base)}")
+        print(f"log: {LOG_FILE}")
+        return 0
+    print("codexDNS stopped")
+    return 1
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    upstream_port_env = os.environ.get("CODEXDNS_UPSTREAM_PORT")
+    parser = argparse.ArgumentParser(description="Local Codex API reverse proxy with configurable upstream URL.")
+    parser.add_argument("command", nargs="?", choices=COMMANDS, default="serve")
+    parser.add_argument("--listen", default=os.environ.get("CODEXDNS_LISTEN", DEFAULT_LISTEN))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("CODEXDNS_PORT", str(DEFAULT_PORT))))
+    parser.add_argument("--listen-base", default=os.environ.get("CODEXDNS_LISTEN_BASE", DEFAULT_LISTEN_BASE))
+    parser.add_argument("--upstream-url", default=os.environ.get("CODEXDNS_UPSTREAM_URL", DEFAULT_UPSTREAM_URL))
+    parser.add_argument("--upstream-host", default=os.environ.get("CODEXDNS_UPSTREAM_HOST"))
+    parser.add_argument("--upstream-port", type=int, default=int(upstream_port_env) if upstream_port_env else None)
+    parser.add_argument("--upstream-base", default=os.environ.get("CODEXDNS_UPSTREAM_BASE"))
+    parser.add_argument("--upstream-ips", default=os.environ.get("CODEXDNS_UPSTREAM_IPS"))
+    parser.add_argument("--timeout", type=float, default=float(os.environ.get("CODEXDNS_TIMEOUT", "360")))
+    parser.add_argument("--resolve-ttl", type=float, default=float(os.environ.get("CODEXDNS_RESOLVE_TTL", str(DEFAULT_RESOLVE_TTL))))
+    parser.add_argument("--failure-cooldown", type=float, default=float(os.environ.get("CODEXDNS_FAILURE_COOLDOWN", str(DEFAULT_FAILURE_COOLDOWN))))
+    normalized_argv = list(argv)
+    if normalized_argv and not normalized_argv[0].startswith("-"):
+        lowered = normalized_argv[0].lower()
+        if lowered in COMMANDS:
+            normalized_argv[0] = lowered
+    return parser.parse_args(normalized_argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    command = args.command.lower()
+    if command == "serve":
+        return serve(args)
+    if command == "start":
+        return start(args)
+    if command == "stop":
+        return stop(args)
+    if command == "restart":
+        stop(args)
+        return start(args)
+    if command == "status":
+        return status(args)
+    raise SystemExit(f"unknown command: {args.command}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

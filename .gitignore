@@ -12,6 +12,12 @@
 
 # independent runtime repo
 /projectying/
+/projectling/
+/aidebug/
+
+# python cache
+__pycache__/
+*.pyc
 
 # sqlite
 memory/*.sqlite

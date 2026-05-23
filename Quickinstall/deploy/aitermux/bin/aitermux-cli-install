@@ -1,0 +1,51 @@
+#!/data/data/com.termux/files/usr/bin/env bash
+set -euo pipefail
+
+AITERMUX_HOME="${AITERMUX_HOME:-$HOME/AItermux}"
+BOOTSTRAP="$AITERMUX_HOME/bin/aitermux-bootstrap"
+
+usage() {
+  cat <<'EOF'
+AITermux CLI installer
+
+Usage:
+  aitermux-cli-install codex
+  aitermux-cli-install gemini
+  aitermux-cli-install claude
+  aitermux-cli-install projectying
+  aitermux-cli-install projectling
+  aitermux-cli-install update-projects
+  aitermux-cli-install all
+
+This is a thin wrapper around aitermux-bootstrap. It installs Termux-side
+runtime dependencies only when the user explicitly asks for a CLI or launches
+it from MOTD.
+EOF
+}
+
+component="${1:-}"
+case "$component" in
+  -h|--help|help|"")
+    usage
+    exit 0
+    ;;
+  projectying|projectling|codex|gemini|claude)
+    exec "$BOOTSTRAP" --force --component "$component"
+    ;;
+  update-projects)
+    "$BOOTSTRAP" --force --update --component projectying
+    "$BOOTSTRAP" --force --update --component projectling
+    ;;
+  all)
+    "$BOOTSTRAP" --force --component projectling
+    "$BOOTSTRAP" --force --component projectying
+    "$BOOTSTRAP" --force --component codex
+    "$BOOTSTRAP" --force --component gemini
+    "$BOOTSTRAP" --force --component claude
+    ;;
+  *)
+    printf 'unknown component: %s\n' "$component" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

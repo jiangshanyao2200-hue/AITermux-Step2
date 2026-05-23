@@ -1,0 +1,4 @@
+#!/data/data/com.termux/files/usr/bin/env bash
+set -euo pipefail
+export SSL_CERT_FILE="${SSL_CERT_FILE:-/data/data/com.termux/files/usr/etc/tls/cert.pem}"
+exec /data/data/com.termux/files/usr/bin/codex "$@"

@@ -2,14 +2,18 @@
 set -euo pipefail
 
 QUICK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$QUICK_ROOT/.." && pwd)"
 PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
 AITERMUX_HOME="${AITERMUX_HOME:-$HOME/AItermux}"
-PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/projectying.git}"
+PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/projectying-termux.git}"
+PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/projectling-termux.git}"
 BACKUP_ROOT="$AITERMUX_HOME/backups"
+AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/aidebug}"
+AIDEBUG_LOG_DIR="$AIDEBUG_DIR/logs"
+INSTALL_AIDEBUG_LOG="$AIDEBUG_LOG_DIR/install.log"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="$BACKUP_ROOT/upgrade-$STAMP"
 DRY_RUN=0
-SKIP_PREVIEW=0
 QUIET=0
 
 usage() {
@@ -17,22 +21,28 @@ usage() {
 AITermux 一键覆盖部署（Termux）
 
 用法：
-  bash ~/AItermux/install.sh [--dry-run] [--skip-preview] [--quiet]
+  bash ~/AItermux/install.sh [--dry-run] [--quiet]
   # 或者：cd ~/AItermux/Quickinstall && bash install.sh [args]
 
 参数：
   --dry-run       仅打印操作，不写入文件
-  --skip-preview  安装完成后不预览随机启动动画
   --quiet         减少输出（不打印每条命令）
 
 环境变量：
   AITERMUX_HOME            默认：$HOME/AItermux
-  AITERMUX_PROJECTYING_REPO 默认：https://github.com/jiangshanyao2200-hue/projectying.git
+  AITERMUX_PROJECTYING_REPO 默认：https://github.com/jiangshanyao2200-hue/projectying-termux.git
+  AITERMUX_PROJECTLING_REPO 默认：https://github.com/jiangshanyao2200-hue/projectling-termux.git
 EOF
 }
 
 log() {
   printf '[%s] [install-aitermux] %s\n' "$(date '+%F %T' 2>/dev/null || echo unknown)" "$*"
+}
+
+append_manifest() {
+  (( DRY_RUN == 0 )) || return 0
+  [ -n "${MANIFEST_FILE:-}" ] || return 0
+  printf '%s\n' "$*" >>"$MANIFEST_FILE" 2>/dev/null || true
 }
 
 run_cmd() {
@@ -67,7 +77,7 @@ install_file() {
   if (( DRY_RUN == 0 )); then
     sha_src="$(sha256sum "$src" 2>/dev/null | awk '{print $1}' || true)"
     sha_dst="$(sha256sum "$dst" 2>/dev/null | awk '{print $1}' || true)"
-    printf '%s\t%s\t%s\t%s\n' "$mode" "$dst" "${sha_dst:-}" "${sha_src:-}" >>"$MANIFEST_FILE" 2>/dev/null || true
+    append_manifest "$(printf '%s\t%s\t%s\t%s' "$mode" "$dst" "${sha_dst:-}" "${sha_src:-}")"
   fi
 }
 
@@ -85,7 +95,7 @@ ensure_termux_shell() {
   run_cmd mkdir -p "$HOME/.termux"
   log "设置登录 shell：$shell_link -> $zsh_bin"
   run_cmd ln -sfn "$zsh_bin" "$shell_link"
-  printf 'shell\t%s\t%s\n' "$shell_link" "$zsh_bin" >>"$MANIFEST_FILE" 2>/dev/null || true
+  append_manifest "$(printf 'shell\t%s\t%s' "$shell_link" "$zsh_bin")"
 }
 
 ensure_zshrc_block() {
@@ -144,7 +154,27 @@ ensure_zshrc_block() {
 
   mv "$tmp.new" "$zshrc"
   rm -f "$tmp" "$tmp2"
-  printf 'zshrc\t%s\n' "$zshrc" >>"$MANIFEST_FILE" 2>/dev/null || true
+  append_manifest "$(printf 'zshrc\t%s' "$zshrc")"
+}
+
+ensure_zsh_theme_source() {
+  local zshrc="$HOME/.zshrc"
+  local source_line='source "/data/data/com.termux/files/home/.zsh-themes/td.zsh-theme"'
+
+  if (( DRY_RUN )); then
+    log "将校验 $zshrc 是否加载 td.zsh-theme。"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$zshrc")"
+  [ -f "$zshrc" ] || touch "$zshrc"
+  if grep -Fqx "$source_line" "$zshrc" 2>/dev/null; then
+    return 0
+  fi
+
+  backup_file "$zshrc"
+  log "写入：$zshrc（补齐 td.zsh-theme source 行）"
+  printf '\n%s\n' "$source_line" >>"$zshrc"
 }
 
 install_startboot_pool() {
@@ -162,10 +192,97 @@ install_startboot_pool() {
   done
 }
 
+install_zsh_theme() {
+  local src="$QUICK_ROOT/deploy/aitermux/td.zsh-theme"
+  local dst="$HOME/.zsh-themes/td.zsh-theme"
+
+  if [ ! -f "$src" ]; then
+    echo "[install-aitermux] zsh 主题缺失：$src" >&2
+    exit 1
+  fi
+
+  log "安装 zsh 主题"
+  install_file "$src" "$dst" 0644
+}
+
+install_aidebug_runtime() {
+  local src_dir="$REPO_ROOT/aidebug"
+
+  log "准备 aidebug 统一调试链路"
+  run_cmd mkdir -p \
+    "$AIDEBUG_DIR" \
+    "$AIDEBUG_DIR/bin" \
+    "$AIDEBUG_DIR/logs" \
+    "$AIDEBUG_DIR/state" \
+    "$AIDEBUG_DIR/legacy" \
+    "$AIDEBUG_DIR/projectling/terminal output" \
+    "$HOME/.local/bin"
+
+  if [ -f "$src_dir/README.md" ] && [ "$src_dir/README.md" != "$AIDEBUG_DIR/README.md" ]; then
+    install_file "$src_dir/README.md" "$AIDEBUG_DIR/README.md" 0644
+  fi
+  if [ -f "$src_dir/bin/aidebug" ] && [ "$src_dir/bin/aidebug" != "$AIDEBUG_DIR/bin/aidebug" ]; then
+    install_file "$src_dir/bin/aidebug" "$AIDEBUG_DIR/bin/aidebug" 0755
+  fi
+  if [ -f "$AIDEBUG_DIR/bin/aidebug" ]; then
+    run_cmd chmod 0755 "$AIDEBUG_DIR/bin/aidebug"
+    run_cmd ln -sfn "$AIDEBUG_DIR/bin/aidebug" "$HOME/.local/bin/aidebug"
+  fi
+}
+
+install_local_bin_tools() {
+  local src_root="$QUICK_ROOT/deploy/local/bin"
+  local src base
+
+  [ -d "$src_root" ] || return 0
+  log "安装 AITermux 本地工具"
+  run_cmd mkdir -p "$HOME/.local/bin"
+  while IFS= read -r src; do
+    base="$(basename "$src")"
+    install_file "$src" "$HOME/.local/bin/$base" 0755
+  done < <(find "$src_root" -maxdepth 1 -type f | sort)
+}
+
+install_aitermux_bin_tools() {
+  local src_root="$QUICK_ROOT/deploy/aitermux/bin"
+  local src base
+
+  [ -d "$src_root" ] || return 0
+  log "安装 AITermux bin 工具"
+  run_cmd mkdir -p "$AITERMUX_HOME/bin"
+  while IFS= read -r src; do
+    base="$(basename "$src")"
+    install_file "$src" "$AITERMUX_HOME/bin/$base" 0755
+  done < <(find "$src_root" -maxdepth 1 -type f | sort)
+}
+
+install_project_components() {
+  local bootstrap="$AITERMUX_HOME/bin/aitermux-bootstrap"
+  local component=""
+
+  if (( DRY_RUN )); then
+    log "将通过 bootstrap 检查/拉取 projectling 与 projectying。"
+    return 0
+  fi
+
+  if [ ! -x "$bootstrap" ]; then
+    log "bootstrap 缺失，跳过 projectling/projectying 拉取：$bootstrap"
+    return 0
+  fi
+
+  for component in projectling projectying; do
+    log "检查/拉取组件：$component"
+    if "$bootstrap" --force --component "$component"; then
+      log "组件就绪：$component"
+    else
+      log "组件补装失败：$component（可在 motd 设置菜单里稍后重试）"
+    fi
+  done
+}
+
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
-    --skip-preview) SKIP_PREVIEW=1 ;;
     --quiet) QUIET=1 ;;
     --help|-h) usage; exit 0 ;;
     *)
@@ -193,16 +310,18 @@ MANIFEST_FILE="$BACKUP_DIR/manifest.tsv"
 if (( DRY_RUN == 0 )); then
   : >"$MANIFEST_FILE" 2>/dev/null || true
   printf 'mode\tpath\tsha_dst\tsha_src\n' >>"$MANIFEST_FILE" 2>/dev/null || true
+  mkdir -p "$AIDEBUG_LOG_DIR" 2>/dev/null || true
 
   if command -v tee >/dev/null 2>&1; then
-    exec > >(tee -a "$BACKUP_DIR/install.log") 2>&1
-    log "安装日志：$BACKUP_DIR/install.log"
+    exec > >(tee -a "$BACKUP_DIR/install.log" "$INSTALL_AIDEBUG_LOG") 2>&1
+    log "安装日志：$BACKUP_DIR/install.log / $INSTALL_AIDEBUG_LOG"
   fi
 fi
 
 trap 'log "错误：安装中断（line=$LINENO）。可用备份目录回滚：$BACKUP_DIR"' ERR
 
 run_cmd mkdir -p "$AITERMUX_HOME" "$AITERMUX_HOME/bin" "$AITERMUX_HOME/startboot" "$HOME/.termux"
+install_aidebug_runtime
 
 log "校验 zsh 登录链"
 ensure_termux_shell
@@ -218,11 +337,18 @@ install_file "$QUICK_ROOT/deploy/termux/tx11start.sh" "$PREFIX_DIR/bin/tx11start
 log "安装 AITermux 启动器"
 install_file "$QUICK_ROOT/deploy/aitermux/aitermux" "$AITERMUX_HOME/bin/aitermux" 0755
 install_file "$QUICK_ROOT/deploy/aitermux/bootstrap.sh" "$AITERMUX_HOME/bin/aitermux-bootstrap" 0755
+install_aitermux_bin_tools
+install_project_components
+
+install_zsh_theme
+
+install_local_bin_tools
 
 install_startboot_pool
 
 log "写入 zsh 自动启动段"
 ensure_zshrc_block
+ensure_zsh_theme_source
 
 if (( DRY_RUN == 0 )); then
   log "生成回滚脚本：$BACKUP_DIR/rollback.sh"
@@ -234,33 +360,23 @@ BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$BACKUP_DIR"
 
 echo "[rollback] from: $BACKUP_DIR"
-find . -type f -print0 | while IFS= read -r -d '' f; do
-  target="/${f#./}"
-  mkdir -p "$(dirname "$target")"
-  cp -a "$f" "$target"
-  echo "[rollback] restore: $target"
-done
+if [ -d ./data/data ]; then
+  find ./data/data -type f -print0 | while IFS= read -r -d '' f; do
+    target="/${f#./}"
+    mkdir -p "$(dirname "$target")"
+    cp -a "$f" "$target"
+    echo "[rollback] restore: $target"
+  done
+fi
 echo "[rollback] done."
 EOF
   chmod 0755 "$BACKUP_DIR/rollback.sh" 2>/dev/null || true
 fi
 
-if (( SKIP_PREVIEW == 0 )); then
-  if [ -t 1 ]; then
-    log "预览一次随机开屏动画"
-    if (( DRY_RUN )); then
-      printf '+ %q %q\n' "$HOME/.termux/motd.sh" ""
-    else
-      AITERMUX_MOTD_DEBUG=1 "$HOME/.termux/motd.sh" || true
-    fi
-  else
-    log "当前无 TTY，跳过动画预览。"
-  fi
-fi
-
 log "完成。"
 log "projectying 仓库地址：$PROJECTYING_REPO"
-log "本次只部署 AITermux 启动链/样式层，不主动安装 projectying/codex/gemini。"
-log "下次新开 Termux 会话时，如运行时缺失，将由启动链自动补装。"
+log "projectling 仓库地址：$PROJECTLING_REPO"
+log "本次部署 AITermux 启动链/样式层，并通过 bootstrap 按需拉取 projectling/projectying 源码。"
+log "本次不主动安装 codex/gemini/claude；下次点击对应 Launcher 入口时按需补装。"
 log "下次新开 Termux 会话将自动进入 AITermux。"
 log "如需回滚，请从 $BACKUP_DIR 取回被覆盖文件。"

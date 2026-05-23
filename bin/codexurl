@@ -1,0 +1,256 @@
+#!/data/data/com.termux/files/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR="${CODEXURL_STATE_DIR:-$HOME/.local/share/codexurl}"
+STATE_FILE="${CODEXURL_STATE_FILE:-$STATE_DIR/upstream-url}"
+DEFAULT_UPSTREAM_URL="${CODEXURL_DEFAULT_UPSTREAM_URL:-https://api.rainp.xyz/v1}"
+
+find_proxy_bin() {
+  if [[ -n "${CODEXURL_PROXY_BIN:-}" && -x "${CODEXURL_PROXY_BIN:-}" ]]; then
+    printf '%s\n' "$CODEXURL_PROXY_BIN"
+    return 0
+  fi
+
+  local candidate
+  for candidate in \
+    "$HOME/AItermux/bin/codexDNS" \
+    "$HOME/.local/share/codexurl/codexDNS" \
+    "$HOME/bin/codexDNS"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+trim() {
+  local text="${1:-}"
+  text="${text#"${text%%[![:space:]]*}"}"
+  text="${text%"${text##*[![:space:]]}"}"
+  printf '%s' "$text"
+}
+
+is_valid_url() {
+  case "$1" in
+    http://*|https://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+selected_upstream_url() {
+  local url=""
+
+  if [[ -n "${CODEXDNS_UPSTREAM_URL:-}" ]] && is_valid_url "$CODEXDNS_UPSTREAM_URL"; then
+    printf '%s\n' "$CODEXDNS_UPSTREAM_URL"
+    return 0
+  fi
+
+  if [[ -s "$STATE_FILE" ]]; then
+    IFS= read -r url <"$STATE_FILE" || true
+    url="$(trim "$url")"
+    if [[ -n "$url" ]] && is_valid_url "$url"; then
+      printf '%s\n' "$url"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "$DEFAULT_UPSTREAM_URL"
+}
+
+save_upstream_url() {
+  local url
+  url="$(trim "$1")"
+  if ! is_valid_url "$url"; then
+    echo "URL 无效，需要以 http:// 或 https:// 开头" >&2
+    return 2
+  fi
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "$url" >"$STATE_FILE"
+}
+
+clear_upstream_url() {
+  rm -f "$STATE_FILE"
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  codexurl
+
+菜单：
+  1 开启代理
+  2 关闭代理
+  3 重启代理
+  4 代理指定域名
+  5 取消代理指定域名
+EOF
+}
+
+proxy_bin="$(find_proxy_bin || true)"
+if [[ -z "$proxy_bin" ]]; then
+  echo "codexurl: cannot find executable proxy backend: $HOME/AItermux/bin/codexDNS" >&2
+  exit 127
+fi
+
+run_proxy() {
+  local url
+  url="$(selected_upstream_url)"
+  CODEXDNS_UPSTREAM_URL="$url" "$proxy_bin" "$@"
+}
+
+is_running() {
+  "$proxy_bin" status >/dev/null 2>&1
+}
+
+status_text() {
+  if is_running; then
+    printf '运行中'
+  else
+    printf '已关闭'
+  fi
+}
+
+show_status() {
+  echo "代理状态：$(status_text)"
+  echo "当前上游：$(selected_upstream_url)"
+}
+
+start_proxy() {
+  if is_running; then
+    echo "代理已启动，正在按当前配置重启..."
+    run_proxy restart
+  else
+    run_proxy start
+  fi
+}
+
+stop_proxy() {
+  "$proxy_bin" stop
+}
+
+restart_proxy() {
+  run_proxy restart
+}
+
+set_custom_upstream() {
+  local url
+  printf '输入代理 URL：'
+  IFS= read -r url || return 0
+  url="$(trim "$url")"
+  if ! save_upstream_url "$url"; then
+    return 0
+  fi
+  echo "已设置代理上游：$url"
+  start_proxy
+}
+
+cancel_custom_upstream() {
+  local was_running=0
+  if is_running; then
+    was_running=1
+  fi
+
+  clear_upstream_url
+  echo "已取消代理指定域名，恢复默认上游：$DEFAULT_UPSTREAM_URL"
+
+  if [[ "$was_running" -eq 1 ]]; then
+    run_proxy restart
+  fi
+}
+
+show_menu() {
+  echo
+  echo "codexurl"
+  echo "状态：$(status_text)"
+  echo "上游：$(selected_upstream_url)"
+  echo
+  echo "1 开启代理"
+  echo "2 关闭代理"
+  echo "3 重启代理"
+  echo "4 代理指定域名"
+  echo "5 取消代理指定域名"
+  echo "0 退出"
+  printf '请选择：'
+}
+
+menu_loop() {
+  local choice
+  while true; do
+    show_menu
+    IFS= read -r choice || return 0
+    choice="$(trim "$choice")"
+    choice="${choice,,}"
+
+    case "$choice" in
+      1) start_proxy ;;
+      2) stop_proxy ;;
+      3) restart_proxy ;;
+      4) set_custom_upstream ;;
+      5) cancel_custom_upstream ;;
+      0|q|quit|exit|退出|"") return 0 ;;
+      *) echo "无效选择：$choice" >&2 ;;
+    esac
+  done
+}
+
+arg="${1:-}"
+case "$arg" in
+  http://*|https://*) ;;
+  *) arg="${arg,,}" ;;
+esac
+
+case "$arg" in
+  "")
+    menu_loop
+    ;;
+  q|quit|exit|退出)
+    exit 0
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  menu)
+    menu_loop
+    ;;
+  1|start|on)
+    start_proxy
+    ;;
+  2|stop|close|off)
+    stop_proxy
+    ;;
+  3|restart|reload)
+    restart_proxy
+    ;;
+  4)
+    set_custom_upstream
+    ;;
+  5|clear|default)
+    cancel_custom_upstream
+    ;;
+  status)
+    show_status
+    ;;
+  http://*|https://*)
+    if ! save_upstream_url "$1"; then
+      exit 2
+    fi
+    start_proxy
+    ;;
+  --url|--upstream-url)
+    if [[ -z "${2:-}" ]]; then
+      echo "codexurl: missing URL after $1" >&2
+      exit 2
+    fi
+    if ! save_upstream_url "$2"; then
+      exit 2
+    fi
+    start_proxy
+    ;;
+  *)
+    echo "未知参数：$1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
