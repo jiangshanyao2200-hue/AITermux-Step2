@@ -228,10 +228,26 @@ codex_package_version() {
   node -e 'const p=require(process.argv[1]); process.stdout.write(String(p.version || ""))' "$package_json" 2>/dev/null || true
 }
 
+codex_main_ready() {
+  local codex_js="$PREFIX_DIR/lib/node_modules/@openai/codex/bin/codex.js"
+  local package_json="$PREFIX_DIR/lib/node_modules/@openai/codex/package.json"
+
+  [[ -x "$PREFIX_DIR/bin/codex" ]] || return 1
+  [[ -s "$codex_js" ]] || return 1
+  [[ -s "$package_json" ]] || return 1
+}
+
+install_codex_main_package() {
+  log "npm install component=codex package=@openai/codex include=optional force=true"
+  npm install -g --force --include=optional --ignore-scripts=false @openai/codex@latest
+}
+
 install_codex_native_package() {
   local version="$1"
   local platform_pkg=""
   local arch=""
+  local package_dir=""
+  local native_binary=""
 
   platform_pkg="$(codex_platform_package)" || return 1
   arch="$(node -p 'process.arch' 2>/dev/null || true)"
@@ -242,9 +258,24 @@ install_codex_native_package() {
     *) return 1 ;;
   esac
 
+  package_dir="$PREFIX_DIR/lib/node_modules/${platform_pkg}"
+
+  log "npm repair component=codex package=${platform_pkg} version=${version}"
+  npm uninstall -g "$platform_pkg" >/dev/null 2>&1 || true
+  case "$package_dir" in
+    "$PREFIX_DIR"/lib/node_modules/@openai/codex-linux-*)
+      rm -rf "$package_dir" >/dev/null 2>&1 || true
+      ;;
+  esac
+
   log "npm install component=codex package=${platform_pkg} alias=@openai/codex@${version}-linux-${arch}"
   npm install -g --force --include=optional --ignore-scripts=false \
-    "${platform_pkg}@npm:@openai/codex@${version}-linux-${arch}"
+    "${platform_pkg}@npm:@openai/codex@${version}-linux-${arch}" || return 1
+
+  native_binary="$(codex_native_binary_path || true)"
+  if [[ -n "$native_binary" && -f "$native_binary" ]]; then
+    chmod 0755 "$native_binary" >/dev/null 2>&1 || true
+  fi
 }
 
 write_codex_wrapper() {
@@ -272,14 +303,32 @@ case "$arch" in
     ;;
 esac
 
-if [ ! -x "$REAL_CODEX" ] || [ ! -s "$CODEX_JS" ]; then
-  printf 'CODEX 尚未安装完整。请运行：aitermux-cli-install codex\n' >&2
-  exit 127
+codex_ready() {
+  [ -x "$REAL_CODEX" ] || return 1
+  [ -s "$CODEX_JS" ] || return 1
+  [ -x "$native" ] || return 1
+}
+
+codex_repair_once() {
+  [ "${AITERMUX_CODEX_SELF_HEAL:-1}" = "1" ] || return 1
+  [ "${AITERMUX_CODEX_BOOTSTRAP_ACTIVE:-0}" != "1" ] || return 1
+  bootstrap="${AITERMUX_HOME:-$HOME/AItermux}/bin/aitermux-bootstrap"
+  [ -x "$bootstrap" ] || return 1
+  printf 'CODEX 组件不完整，正在自动修复...\n' >&2
+  AITERMUX_CODEX_BOOTSTRAP_ACTIVE=1 "$bootstrap" --force --component codex >&2
+}
+
+if ! codex_ready; then
+  codex_repair_once || true
 fi
 
-if [ ! -x "$native" ]; then
-  printf 'CODEX 缺少原生组件：%s\n' "$platform_pkg" >&2
-  printf '请运行：aitermux-cli-install codex\n' >&2
+if ! codex_ready; then
+  if [ ! -x "$REAL_CODEX" ] || [ ! -s "$CODEX_JS" ]; then
+    printf 'CODEX 尚未安装完整。请运行：aitermux-cli-install codex\n' >&2
+  elif [ ! -x "$native" ]; then
+    printf 'CODEX 缺少原生组件：%s\n' "$platform_pkg" >&2
+    printf '请运行：aitermux-cli-install codex\n' >&2
+  fi
   exit 127
 fi
 
@@ -707,15 +756,22 @@ ensure_codex() {
 
   append_line_if_missing "$HOME/.npmrc" "foreground-scripts=true"
 
-  if [[ ! -f "$codex_js" ]]; then
-    log "npm install component=${component} package=@openai/codex include=optional"
-    if ! npm install -g --include=optional --ignore-scripts=false @openai/codex@latest; then
+  if ! codex_main_ready; then
+    if ! install_codex_main_package; then
       state_set "$component" fail npm-install-failed
       return 1
     fi
   fi
 
   version="$(codex_package_version)"
+  if [[ -z "$version" ]]; then
+    if ! install_codex_main_package; then
+      state_set "$component" fail npm-install-failed
+      return 1
+    fi
+    version="$(codex_package_version)"
+  fi
+
   if ! verify_codex; then
     if [[ -n "$version" ]]; then
       install_codex_native_package "$version" || {

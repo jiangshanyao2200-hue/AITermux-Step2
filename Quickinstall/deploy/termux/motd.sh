@@ -1722,6 +1722,9 @@ motd_bootstrap_latest_line() {
   line="${line#\[aitermux-bootstrap\] }"
   line="${line#* bootstrap }"
   case "$line" in
+    npm\ repair\ component=codex\ package=@openai/codex-linux-*)
+      line="正在修复 CODEX 原生组件"
+      ;;
     npm\ install\ component=codex\ package=@openai/codex-linux-*)
       line="正在补齐 CODEX 原生组件"
       ;;

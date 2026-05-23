@@ -21,14 +21,32 @@ case "$arch" in
     ;;
 esac
 
-if [ ! -x "$REAL_CODEX" ] || [ ! -s "$CODEX_JS" ]; then
-  printf 'CODEX 尚未安装完整。请运行：aitermux-cli-install codex\n' >&2
-  exit 127
+codex_ready() {
+  [ -x "$REAL_CODEX" ] || return 1
+  [ -s "$CODEX_JS" ] || return 1
+  [ -x "$native" ] || return 1
+}
+
+codex_repair_once() {
+  [ "${AITERMUX_CODEX_SELF_HEAL:-1}" = "1" ] || return 1
+  [ "${AITERMUX_CODEX_BOOTSTRAP_ACTIVE:-0}" != "1" ] || return 1
+  bootstrap="${AITERMUX_HOME:-$HOME/AItermux}/bin/aitermux-bootstrap"
+  [ -x "$bootstrap" ] || return 1
+  printf 'CODEX 组件不完整，正在自动修复...\n' >&2
+  AITERMUX_CODEX_BOOTSTRAP_ACTIVE=1 "$bootstrap" --force --component codex >&2
+}
+
+if ! codex_ready; then
+  codex_repair_once || true
 fi
 
-if [ ! -x "$native" ]; then
-  printf 'CODEX 缺少原生组件：%s\n' "$platform_pkg" >&2
-  printf '请运行：aitermux-cli-install codex\n' >&2
+if ! codex_ready; then
+  if [ ! -x "$REAL_CODEX" ] || [ ! -s "$CODEX_JS" ]; then
+    printf 'CODEX 尚未安装完整。请运行：aitermux-cli-install codex\n' >&2
+  elif [ ! -x "$native" ]; then
+    printf 'CODEX 缺少原生组件：%s\n' "$platform_pkg" >&2
+    printf '请运行：aitermux-cli-install codex\n' >&2
+  fi
   exit 127
 fi
 
