@@ -1912,7 +1912,8 @@ motd_has_claude() {
   if [ ! -x "$HOME/.local/bin/claude" ] && [ ! -x "$PREFIX/bin/claude" ]; then
     return 1
   fi
-  [ -f "$PREFIX/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe" ]
+  [ -f "$PREFIX/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe" ] ||
+    [ -x "$PREFIX/lib/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude" ]
 }
 
 motd_projectying_cmd() {

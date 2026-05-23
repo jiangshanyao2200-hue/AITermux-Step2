@@ -1,0 +1,23 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
+REAL_CLAUDE="${PREFIX_DIR}/bin/claude"
+REAL_NODE="${PREFIX_DIR}/bin/node"
+REAL_CLAUDE_BIN="${PREFIX_DIR}/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+MUSL_CLAUDE="${PREFIX_DIR}/lib/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude"
+
+if [ -x "$MUSL_CLAUDE" ] && command -v proot-distro >/dev/null 2>&1; then
+  exec proot-distro login alpine -- sh -lc 'cd "$1" 2>/dev/null || cd /root; shift; exec "$@"' sh "$PWD" "$MUSL_CLAUDE" "$@"
+fi
+
+if [ -x "$REAL_CLAUDE" ] && [ -f "$REAL_CLAUDE_BIN" ] && [ "$(wc -c <"$REAL_CLAUDE_BIN" 2>/dev/null || echo 0)" -gt 4096 ]; then
+  exec "$REAL_CLAUDE" "$@"
+fi
+
+if [ -f "$REAL_CLAUDE_BIN" ] && [ "$(wc -c <"$REAL_CLAUDE_BIN" 2>/dev/null || echo 0)" -gt 4096 ]; then
+  exec "$REAL_NODE" "$REAL_CLAUDE_BIN" "$@"
+fi
+
+printf 'Claude Code is not runnable in this Termux install.\n' >&2
+printf 'Expected Alpine proot plus %s\n' "$MUSL_CLAUDE" >&2
+exit 127

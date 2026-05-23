@@ -382,14 +382,10 @@ EOF
 }
 
 ensure_claude_stack() {
-  local proot_extra=()
   ensure_node_stack || return 1
   ensure_pkg proot proot || return 1
   ensure_pkg proot-distro proot-distro || return 1
-  if proot-distro login --help 2>/dev/null | grep -q -- '--no-arch-warning'; then
-    proot_extra+=(--no-arch-warning)
-  fi
-  if ! proot-distro login "${proot_extra[@]}" alpine -- true >/dev/null 2>&1; then
+  if ! proot-distro login alpine -- true >/dev/null 2>&1; then
     log "proot-distro install alpine for claude"
     proot-distro install alpine || return 1
   fi
@@ -439,11 +435,7 @@ REAL_CLAUDE_BIN="${PREFIX_DIR}/lib/node_modules/@anthropic-ai/claude-code/bin/cl
 MUSL_CLAUDE="${PREFIX_DIR}/lib/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude"
 
 if [ -x "$MUSL_CLAUDE" ] && command -v proot-distro >/dev/null 2>&1; then
-  proot_extra=()
-  if proot-distro login --help 2>/dev/null | grep -q -- '--no-arch-warning'; then
-    proot_extra+=(--no-arch-warning)
-  fi
-  exec proot-distro login "${proot_extra[@]}" alpine -- sh -lc 'cd "$1" 2>/dev/null || cd /root; shift; exec "$@"' sh "$PWD" "$MUSL_CLAUDE" "$@"
+  exec proot-distro login alpine -- sh -lc 'cd "$1" 2>/dev/null || cd /root; shift; exec "$@"' sh "$PWD" "$MUSL_CLAUDE" "$@"
 fi
 
 if [ -x "$REAL_CLAUDE" ] && [ -f "$REAL_CLAUDE_BIN" ] && [ "$(wc -c <"$REAL_CLAUDE_BIN" 2>/dev/null || echo 0)" -gt 4096 ]; then
@@ -885,13 +877,9 @@ ensure_claude() {
   local component="claude"
   local claude_bin=""
   local musl_claude="$PREFIX_DIR/lib/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude"
-  local proot_extra=()
 
   claude_bin="$(claude_entry_path || true)"
-  if proot-distro login --help 2>/dev/null | grep -q -- '--no-arch-warning'; then
-    proot_extra+=(--no-arch-warning)
-  fi
-  if [[ -x "$musl_claude" && -x "$HOME/.local/bin/claude" ]] && proot-distro login "${proot_extra[@]}" alpine -- true >/dev/null 2>&1; then
+  if [[ -x "$musl_claude" && -x "$HOME/.local/bin/claude" ]] && proot-distro login alpine -- true >/dev/null 2>&1; then
     write_claude_wrapper || true
     if verify_claude; then
       state_set "$component" ok present
