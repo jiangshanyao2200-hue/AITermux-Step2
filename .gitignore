@@ -14,6 +14,8 @@
 /projectying/
 /projectling/
 /aidebug/
+/projectling.non-git-*/
+/projectying.non-git-*/
 
 # python cache
 __pycache__/

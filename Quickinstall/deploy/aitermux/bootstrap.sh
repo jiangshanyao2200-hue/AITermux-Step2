@@ -91,7 +91,8 @@ state_set() {
   local component="$1"
   local status="$2"
   local reason="${3:-}"
-  local file tmp
+  local file tmp kv key value
+  shift 3 || true
 
   mkdir -p "$STATE_DIR" >/dev/null 2>&1 || true
   file="$(state_file_for "$component")"
@@ -101,8 +102,66 @@ state_set() {
     printf 'ts=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     printf 'updated_at=%s\n' "$(timestamp_utc)"
     printf 'reason=%s\n' "$reason"
+    for kv in "$@"; do
+      key="${kv%%=*}"
+      value="${kv#*=}"
+      [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+      printf '%s=%s\n' "$key" "$value"
+    done
   } >"$tmp"
   mv -f "$tmp" "$file"
+}
+
+component_lock_path() {
+  local component="$1"
+  local purpose="${2:-run}"
+  printf '%s/locks/%s.%s.lock\n' "$STATE_DIR" "$component" "$purpose"
+}
+
+acquire_component_lock() {
+  local component="$1"
+  local purpose="${2:-run}"
+  local lock_dir pid_file old_pid now mtime stale_after
+
+  mkdir -p "$STATE_DIR/locks" >/dev/null 2>&1 || true
+  lock_dir="$(component_lock_path "$component" "$purpose")"
+  pid_file="$lock_dir/pid"
+  stale_after="${AITERMUX_BOOTSTRAP_LOCK_STALE_SECS:-900}"
+  [[ "$stale_after" =~ ^[0-9]+$ ]] || stale_after=900
+
+  if mkdir "$lock_dir" 2>/dev/null; then
+    printf '%s\n' "$$" >"$pid_file" 2>/dev/null || true
+    return 0
+  fi
+
+  old_pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" 2>/dev/null; then
+    log "component=${component} ${purpose}-blocked reason=already-running pid=${old_pid}"
+    return 1
+  fi
+
+  now="$(date +%s 2>/dev/null || echo 0)"
+  mtime="$(stat -c %Y "$lock_dir" 2>/dev/null || echo 0)"
+  if [[ "$now" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] && (( now - mtime < stale_after )); then
+    log "component=${component} ${purpose}-blocked reason=stale-lock-wait path=${lock_dir}"
+    return 1
+  fi
+
+  log "component=${component} ${purpose}-stale-lock-clean path=${lock_dir}"
+  rm -rf "$lock_dir" 2>/dev/null || true
+  if mkdir "$lock_dir" 2>/dev/null; then
+    printf '%s\n' "$$" >"$pid_file" 2>/dev/null || true
+    return 0
+  fi
+  return 1
+}
+
+release_component_lock() {
+  local component="$1"
+  local purpose="${2:-run}"
+  local lock_dir
+  lock_dir="$(component_lock_path "$component" "$purpose")"
+  rm -rf "$lock_dir" 2>/dev/null || true
 }
 
 skip_due_to_backoff() {
@@ -575,58 +634,99 @@ ensure_git_remote_url() {
 
 update_git_project() {
   local component="$1"
+  local rc=0
+
+  if ! acquire_component_lock "$component" update; then
+    state_set "$component" fail update-busy action=update
+    return 1
+  fi
+  update_git_project_locked "$@"
+  rc=$?
+  release_component_lock "$component" update
+  return "$rc"
+}
+
+update_git_project_locked() {
+  local component="$1"
   local dir="$2"
   local repo="$3"
-  local before="" remote="" after=""
+  local before="" remote="" fetched="" after="" backup=""
 
   skip_due_to_backoff "$component" && return 0
 
   if [[ ! -d "$dir/.git" ]]; then
     if [[ -e "$dir" ]]; then
+      if [[ "$component" == "projectling" ]]; then
+        if backup="$(reclone_projectling_non_git_dir)"; then
+          after="$(git_local_head "$dir")"
+          log "component=${component} update-recloned from=${backup} after=${after:0:12}"
+          state_set "$component" ok recloned action=update before=non-git "after=${after:0:12}" "backup=${backup}"
+          return 0
+        fi
+      fi
       log "component=${component} update-failed reason=not-git path=$dir"
-      state_set "$component" fail not-git
+      state_set "$component" fail not-git action=update
       return 1
     fi
     return 0
   fi
 
   ensure_project_clone_stack || {
-    state_set "$component" fail missing-git
+    state_set "$component" fail missing-git action=update
     return 1
   }
 
   ensure_git_remote_url "$dir" "$repo" || {
-    state_set "$component" fail remote-mismatch
+    state_set "$component" fail remote-mismatch action=update
     return 1
   }
 
+  before="$(git_local_head "$dir")"
+  state_set "$component" running checking action=update "before=${before:0:12}"
+
   if [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]]; then
     log "component=${component} update-blocked reason=dirty-worktree path=$dir"
-    state_set "$component" fail dirty-worktree
+    state_set "$component" fail dirty-worktree action=update "before=${before:0:12}"
     return 1
   fi
 
-  before="$(git_local_head "$dir")"
   remote="$(git_remote_head "$repo")"
   if [[ -z "$remote" ]]; then
     log "component=${component} update-failed reason=remote-head-unavailable repo=$repo"
-    state_set "$component" fail remote-head-unavailable
+    state_set "$component" fail remote-head-unavailable action=update "before=${before:0:12}"
     return 1
   fi
 
   if [[ "$before" == "$remote" ]]; then
     log "component=${component} update-none head=${before:0:12}"
-    state_set "$component" ok up-to-date
+    state_set "$component" ok up-to-date action=update "before=${before:0:12}" "after=${before:0:12}"
     return 0
   fi
 
   log "component=${component} update-fetch before=${before:0:12} remote=${remote:0:12}"
-  git -C "$dir" fetch --prune origin || {
-    state_set "$component" fail git-fetch-failed
+  state_set "$component" running fetching action=update "before=${before:0:12}" "remote=${remote:0:12}"
+  git -C "$dir" fetch --prune origin main || {
+    state_set "$component" fail git-fetch-failed action=update "before=${before:0:12}" "remote=${remote:0:12}"
     return 1
   }
-  git -C "$dir" pull --ff-only origin main || {
-    state_set "$component" fail git-pull-failed
+  fetched="$(git -C "$dir" rev-parse origin/main 2>/dev/null || true)"
+  if [[ -z "$fetched" ]]; then
+    state_set "$component" fail remote-head-unavailable action=update "before=${before:0:12}" "remote=${remote:0:12}"
+    return 1
+  fi
+  if [[ "$before" == "$fetched" ]]; then
+    log "component=${component} update-none head=${before:0:12}"
+    state_set "$component" ok up-to-date action=update "before=${before:0:12}" "after=${before:0:12}"
+    return 0
+  fi
+  if git -C "$dir" merge-base --is-ancestor "$fetched" "$before" 2>/dev/null; then
+    log "component=${component} update-local-ahead local=${before:0:12} remote=${fetched:0:12}"
+    state_set "$component" ok local-ahead action=update "before=${before:0:12}" "after=${before:0:12}" "remote=${fetched:0:12}"
+    return 0
+  fi
+  state_set "$component" running applying action=update "before=${before:0:12}" "remote=${fetched:0:12}"
+  git -C "$dir" merge --ff-only origin/main || {
+    state_set "$component" fail git-pull-failed action=update "before=${before:0:12}" "remote=${fetched:0:12}"
     return 1
   }
   after="$(git_local_head "$dir")"
@@ -635,14 +735,17 @@ update_git_project() {
     if [[ -x "$AITERMUX_HOME/Quickinstall/install.sh" ]]; then
       log "component=aitermux deploy-updated-quickinstall"
       if ! bash "$AITERMUX_HOME/Quickinstall/install.sh" --quiet; then
-        state_set "$component" fail deploy-failed
+        state_set "$component" fail deploy-failed action=update "before=${before:0:12}" "after=${after:0:12}"
         return 1
       fi
     else
       log "component=aitermux deploy-skipped reason=missing-install-sh"
     fi
   fi
-  state_set "$component" ok updated
+  if [[ "$component" == "projectying" ]]; then
+    log "component=projectying build-deferred reason=run-sh-auto-release"
+  fi
+  state_set "$component" ok updated action=update "before=${before:0:12}" "after=${after:0:12}"
   return 0
 }
 
@@ -701,6 +804,72 @@ clone_projectling_preserving_aidebug() {
     rm -rf "$saved_aidebug" >/dev/null 2>&1 || true
   fi
 
+  return 0
+}
+
+copy_projectling_runtime_from_backup() {
+  local backup="$1"
+  local rel=""
+
+  [[ -d "$backup" && -d "$PROJECTLING_DIR" ]] || return 0
+  for rel in memory; do
+    [[ -d "$backup/$rel" ]] || continue
+    mkdir -p "$PROJECTLING_DIR/$rel" >/dev/null 2>&1 || true
+    cp -a "$backup/$rel/." "$PROJECTLING_DIR/$rel/" >/dev/null 2>&1 || true
+  done
+  for rel in \
+    context/entries.jsonl \
+    context/entries.jsonl.lock \
+    context/shared_context.txt \
+    context/.legacy-context-migrated-v1 \
+    aidebug/logs \
+    aidebug/notes \
+    aidebug/tmp \
+    aidebug/state \
+    aidebug/legacy \
+    aidebug/backup \
+    "aidebug/projectling/terminal output" \
+    aidebug/projectling/live; do
+    [[ -e "$backup/$rel" ]] || continue
+    if [[ -d "$backup/$rel" ]]; then
+      mkdir -p "$PROJECTLING_DIR/$rel" >/dev/null 2>&1 || true
+      cp -a "$backup/$rel/." "$PROJECTLING_DIR/$rel/" >/dev/null 2>&1 || true
+    else
+      mkdir -p "$(dirname "$PROJECTLING_DIR/$rel")" >/dev/null 2>&1 || true
+      cp -a "$backup/$rel" "$PROJECTLING_DIR/$rel" >/dev/null 2>&1 || true
+    fi
+  done
+  if [[ -f "$backup/config/env" ]]; then
+    mkdir -p "$PROJECTLING_DIR/config" >/dev/null 2>&1 || true
+    cp -a "$backup/config/env" "$PROJECTLING_DIR/config/env" >/dev/null 2>&1 || true
+  fi
+}
+
+reclone_projectling_non_git_dir() {
+  local stamp backup tmp_dir
+
+  [[ -e "$PROJECTLING_DIR" && ! -d "$PROJECTLING_DIR/.git" ]] || return 1
+  ensure_projectling_stack || return 1
+  stamp="$(date +%Y%m%d-%H%M%S 2>/dev/null || date +%s 2>/dev/null || echo now)"
+  backup="${PROJECTLING_DIR}.non-git-${stamp}"
+  tmp_dir="${PROJECTLING_DIR}.clone-${stamp}.$$"
+
+  log "component=projectling non-git-backup from=${PROJECTLING_DIR} to=${backup}"
+  mv "$PROJECTLING_DIR" "$backup" || return 1
+  rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  if ! git clone "$PROJECTLING_REPO" "$tmp_dir"; then
+    rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+    mv "$backup" "$PROJECTLING_DIR" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv "$tmp_dir" "$PROJECTLING_DIR" || {
+    rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+    mv "$backup" "$PROJECTLING_DIR" >/dev/null 2>&1 || true
+    return 1
+  }
+  copy_projectling_runtime_from_backup "$backup"
+  chmod u+x "$PROJECTLING_DIR/run.sh" >/dev/null 2>&1 || true
+  printf '%s\n' "$backup"
   return 0
 }
 

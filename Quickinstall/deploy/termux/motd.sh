@@ -1712,6 +1712,14 @@ motd_bootstrap_state_reason() {
   sed -n 's/^reason=//p' "$state_file" 2>/dev/null | head -n 1
 }
 
+motd_bootstrap_state_field() {
+  local component="$1"
+  local field="$2"
+  local state_file="$ROOT_DIR/.state/bootstrap/${component}.state"
+  [ -f "$state_file" ] || return 1
+  sed -n "s/^${field}=//p" "$state_file" 2>/dev/null | head -n 1
+}
+
 motd_bootstrap_latest_line() {
   local log_file="$1"
   local line=""
@@ -1872,7 +1880,15 @@ motd_bootstrap_component_now() {
       reason="$(motd_bootstrap_state_reason "$component" || true)"
       case "$reason" in
         up-to-date) motd_render_launcher_status "$label 已是最新版本。" ;;
-        updated) motd_render_launcher_status "$label 更新完成。" ;;
+        updated)
+          case "$component" in
+            aitermux) motd_render_launcher_status "$label 更新完成，重新打开 Termux 生效。" ;;
+            projectying) motd_render_launcher_status "$label 更新完成，下次启动自动 release 构建。" ;;
+            *) motd_render_launcher_status "$label 更新完成。" ;;
+          esac
+          ;;
+        recloned) motd_render_launcher_status "$label 已重新接入独立仓库。" ;;
+        local-ahead) motd_render_launcher_status "$label 本地有未推送提交，远端无更新。" ;;
         *) motd_render_launcher_status "$label 更新检查完成。" ;;
       esac
     else
@@ -1892,6 +1908,9 @@ motd_bootstrap_component_now() {
     git-clone-failed) reason="源码拉取失败" ;;
     git-fetch-failed) reason="远端检查失败" ;;
     git-pull-failed) reason="源码更新失败" ;;
+    update-busy) reason="已有同组件更新正在执行" ;;
+    deploy-failed) reason="源码已更新，但部署脚本执行失败" ;;
+    remote-head-unavailable) reason="无法读取远端版本" ;;
     dirty-worktree) reason="本地源码有未提交改动，已停止自动更新" ;;
     path-exists-but-invalid) reason="本地目录异常，无法识别为源码仓库" ;;
   esac

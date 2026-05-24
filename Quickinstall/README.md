@@ -78,6 +78,8 @@ bash install.sh --quiet
 - `PROJECT凌设置`：直接进入 `projectling` 的统一设置页
 - `启动项管理`：添加、移除、重命名或改路径；自定义项持久化在 `~/AItermux/.state/motd/launchers.tsv`
 - `检测 AITermux 更新` / `检测 PROJECT萤 更新` / `检测 PROJECT凌 更新`：检查远端仓库是否有新提交，有则 fast-forward 拉取源码
+- 更新检查会写入 `~/AItermux/.state/bootstrap/*.state`，并在 `motd` 底部显示精简进度；同一组件重复触发时会加锁，避免多窗口同时更新同一仓库。
+- `PROJECT萤` 更新只拉取源码；如果源码有变化，下一次启动 `PROJECT萤` 时由 `projectying/run.sh` 自动执行 `cargo build --release`。
 
 如果入口缺失，选中后按 Enter 时才会触发安装：
 

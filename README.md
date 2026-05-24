@@ -71,6 +71,8 @@ bash install.sh
 - `gemini`：通过 npm 全局安装 `@google/gemini-cli`，写入 Termux 包装器，并用 `gemini --version` 验证
 - `claude`：安装 `@anthropic-ai/claude-code`，必要时补装 Alpine proot 与 `@anthropic-ai/claude-code-linux-arm64-musl`，并用 `claude --version` 验证
 
+更新链路会把组件状态写到 `~/AItermux/.state/bootstrap/`。AITermux 更新后会自动重新部署启动链；ProjectYing 更新后不会在更新菜单里立即构建，而是在下次启动时检测源码变化并自动执行 release 构建。
+
 也可以手动执行：
 
 ```bash

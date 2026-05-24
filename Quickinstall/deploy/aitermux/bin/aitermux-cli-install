@@ -24,6 +24,21 @@ it from MOTD.
 EOF
 }
 
+run_update_component() {
+  local component="$1"
+  local label="$2"
+  local rc=0
+
+  printf '[aitermux-update] %-12s checking...\n' "$label"
+  if "$BOOTSTRAP" --force --update --component "$component"; then
+    printf '[aitermux-update] %-12s ok\n' "$label"
+    return 0
+  fi
+  rc=$?
+  printf '[aitermux-update] %-12s failed rc=%s\n' "$label" "$rc" >&2
+  return "$rc"
+}
+
 component="${1:-}"
 case "$component" in
   -h|--help|help|"")
@@ -34,9 +49,11 @@ case "$component" in
     exec "$BOOTSTRAP" --force --component "$component"
     ;;
   update-projects)
-    "$BOOTSTRAP" --force --update --component aitermux
-    "$BOOTSTRAP" --force --update --component projectying
-    "$BOOTSTRAP" --force --update --component projectling
+    rc=0
+    run_update_component aitermux AITermux || rc=1
+    run_update_component projectying ProjectYing || rc=1
+    run_update_component projectling ProjectLing || rc=1
+    exit "$rc"
     ;;
   update-aitermux)
     exec "$BOOTSTRAP" --force --update --component aitermux
