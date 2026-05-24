@@ -76,7 +76,7 @@ bash install.sh --quiet
 `PROJECT凌设置` 打开的系统配置菜单当前支持：
 
 - `PROJECT凌设置`：直接进入 `projectling` 的统一设置页
-- `启动项管理`：添加、移除、重命名或改路径；自定义项持久化在 `~/.state/motd/launchers.tsv`
+- `启动项管理`：添加、移除、重命名或改路径；自定义项持久化在 `~/AItermux/.state/motd/launchers.tsv`
 - `检测 AITermux 更新` / `检测 PROJECT萤 更新` / `检测 PROJECT凌 更新`：检查远端仓库是否有新提交，有则 fast-forward 拉取源码
 
 如果入口缺失，选中后按 Enter 时才会触发安装：

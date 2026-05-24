@@ -83,6 +83,24 @@ cleanup_home_junk_files() {
     log "删除残留：$path"
     run_cmd rm -rf "$path"
   done
+
+  cleanup_legacy_home_state
+}
+
+cleanup_legacy_home_state() {
+  local legacy_state="$HOME/.state"
+  local legacy_motd="$legacy_state/motd"
+  local current_motd="$AITERMUX_HOME/.state/motd"
+
+  [ -d "$legacy_motd" ] || return 0
+  [ "$legacy_motd" != "$current_motd" ] || return 0
+
+  log "删除旧版 MOTD 状态目录：$legacy_motd"
+  run_cmd rm -rf "$legacy_motd"
+
+  if [ -d "$legacy_state" ]; then
+    rmdir "$legacy_state" 2>/dev/null || true
+  fi
 }
 
 cleanup_old_backup_dirs() {
