@@ -87,7 +87,7 @@ GitHub 推送凭据可用本机登录助手保存：
 aitermux-github-login
 ```
 
-它会隐藏读取 token，并通过 GitHub CLI 配置 `git push` 凭据，避免把 key 写进仓库、脚本或命令历史。
+它会明文读取本机输入的 token，并通过 GitHub CLI 配置 `git push` 凭据，避免把 key 写进仓库、脚本或命令历史。建议使用 classic token，并勾选 `repo`、`read:org`、`gist`。
 
 ## 目录边界
 

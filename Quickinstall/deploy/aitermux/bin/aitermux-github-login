@@ -16,7 +16,7 @@ Usage:
   - 默认明文输入 token，便于确认已输入；如需隐藏输入可加 --hidden。
   - Token 不会写入 shell history，不会写入 git remote，不会进入仓库。
   - 登录后会执行 gh auth setup-git，让 git push 自动使用 gh 凭据。
-  - 推荐 token scopes：repo。只推公开仓库时可用 public_repo。
+  - 推荐 classic token scopes：repo、read:org、gist。
 EOF
 }
 
@@ -72,7 +72,7 @@ login() {
 
   ensure_gh
   echo "请输入 GitHub token。"
-  echo "建议 scopes：repo；只推公开仓库可用 public_repo。"
+  echo "建议 classic token scopes：repo、read:org、gist。"
   if [ "$input_mode" = "hidden" ]; then
     echo "当前为隐藏输入模式，输入不会显示在屏幕上。"
     printf 'GitHub token: '
