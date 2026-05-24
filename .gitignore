@@ -29,3 +29,6 @@ test_patch.txt
 
 # local backups
 backup/
+
+# local release/update notes, not synced to repo
+/更新文档.Md
