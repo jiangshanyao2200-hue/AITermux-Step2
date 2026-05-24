@@ -1,0 +1,91 @@
+#!/data/data/com.termux/files/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+AITermux GitHub 登录助手
+
+Usage:
+  aitermux-github-login
+  aitermux-github-login --status
+  aitermux-github-login --logout
+
+说明：
+  - 使用 GitHub 官方 CLI gh 保存凭据。
+  - Token 通过隐藏输入读取，不会写入 shell history。
+  - 登录后会执行 gh auth setup-git，让 git push 自动使用 gh 凭据。
+  - 推荐 token scopes：repo。只推公开仓库时可用 public_repo。
+EOF
+}
+
+ensure_gh() {
+  if command -v gh >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v pkg >/dev/null 2>&1; then
+    echo "缺少 gh，且未找到 pkg，无法自动安装。" >&2
+    return 1
+  fi
+  echo "未检测到 gh，正在安装 GitHub CLI..."
+  pkg install -y gh
+}
+
+secure_gh_config_permissions() {
+  chmod 700 "$HOME/.config" "$HOME/.config/gh" 2>/dev/null || true
+  chmod 600 "$HOME/.config/gh/hosts.yml" 2>/dev/null || true
+}
+
+status() {
+  ensure_gh
+  gh auth status --hostname github.com
+}
+
+logout() {
+  ensure_gh
+  gh auth logout --hostname github.com || true
+  git config --global --unset-all credential.https://github.com.helper 2>/dev/null || true
+  git config --global --unset-all credential.helper 2>/dev/null || true
+  echo "GitHub 登录信息已清理。"
+}
+
+login() {
+  local token=""
+
+  ensure_gh
+  echo "请输入 GitHub token。输入不会显示在屏幕上。"
+  echo "建议 scopes：repo；只推公开仓库可用 public_repo。"
+  printf 'GitHub token: '
+  IFS= read -r -s token
+  printf '\n'
+  if [ -z "$token" ]; then
+    echo "token 为空，已取消。" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$token" | gh auth login --hostname github.com --with-token
+  token=""
+  gh auth setup-git --hostname github.com
+  secure_gh_config_permissions
+  gh auth status --hostname github.com
+  echo "GitHub 凭据已保存。以后 git push 会自动使用 gh。"
+}
+
+case "${1:-}" in
+  -h|--help|help)
+    usage
+    ;;
+  --status|status)
+    status
+    ;;
+  --logout|logout)
+    logout
+    ;;
+  "")
+    login
+    ;;
+  *)
+    echo "未知参数：$1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

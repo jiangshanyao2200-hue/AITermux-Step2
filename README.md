@@ -81,11 +81,20 @@ aitermux-cli-install update-aitermux
 aitermux-cli-install update-projects
 ```
 
+GitHub 推送凭据可用本机登录助手保存：
+
+```bash
+aitermux-github-login
+```
+
+它会隐藏读取 token，并通过 GitHub CLI 配置 `git push` 凭据，避免把 key 写进仓库、脚本或命令历史。
+
 ## 目录边界
 
 - `Quickinstall/`：一键覆盖部署脚本与模板
 - `install.sh`：根目录安装入口
 - `bin/aitermux-bootstrap`：运行时缺失依赖补装器
+- `bin/aitermux-github-login`：GitHub CLI 登录助手，用于保存本机 push 凭据
 - `bin/aitermux`：AITermux 启动器
 - `startboot/`：本机动画脚本池
 - `projectling/aidebug/`：Project凌 的本机调试日志目录，默认不随仓库发布
