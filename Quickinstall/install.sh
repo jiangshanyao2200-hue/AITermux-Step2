@@ -66,6 +66,44 @@ backup_file() {
   run_cmd cp -a "$target" "$dest"
 }
 
+cleanup_home_junk_files() {
+  local rel path
+  local -a junk_paths=(
+    "longgu-stage1.log"
+    "longgu-termux-kit-step1"
+    "old-config-20260524-033818.tar.xz"
+    "termux-desktop.log"
+    ".zshrc-24-05-2026.bak"
+  )
+
+  log "清理已知安装残留"
+  for rel in "${junk_paths[@]}"; do
+    path="$HOME/$rel"
+    [ -e "$path" ] || continue
+    log "删除残留：$path"
+    run_cmd rm -rf "$path"
+  done
+}
+
+cleanup_old_backup_dirs() {
+  local keep="${AITERMUX_BACKUP_KEEP:-5}"
+  local index=0 dir
+
+  case "$keep" in ''|*[!0-9]*) keep=5 ;; esac
+  [ "$keep" -ge 1 ] 2>/dev/null || keep=5
+  [ -d "$BACKUP_ROOT" ] || return 0
+
+  log "清理旧备份目录：保留最近 ${keep} 个 upgrade-*"
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    index=$((index + 1))
+    [ "$index" -le "$keep" ] && continue
+    [ -d "$dir" ] || continue
+    log "删除旧备份：$dir"
+    run_cmd rm -rf "$dir"
+  done < <(ls -1dt "$BACKUP_ROOT"/upgrade-* 2>/dev/null || true)
+}
+
 install_file() {
   local src="$1"
   local dst="$2"
@@ -370,6 +408,9 @@ echo "[rollback] done."
 EOF
   chmod 0755 "$BACKUP_DIR/rollback.sh" 2>/dev/null || true
 fi
+
+cleanup_home_junk_files
+cleanup_old_backup_dirs
 
 log "完成。"
 log "projectying 仓库地址：$PROJECTYING_REPO"

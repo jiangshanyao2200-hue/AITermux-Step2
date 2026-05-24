@@ -116,4 +116,5 @@ bash install.sh --quiet
 
 - 每次安装会创建备份目录：`~/AItermux/backups/upgrade-YYYYMMDD-HHMMSS/`
 - 安装过程会输出每一步，并同时写入备份目录的 `install.log` 与 `~/AItermux/projectling/aidebug/logs/install.log`
+- 安装/更新会自动清理旧安装残留，并只保留最近 5 个 `upgrade-*` 备份目录；可用 `AITERMUX_BACKUP_KEEP` 调整保留数量。
 - 回滚脚本：`rollback.sh`（把备份文件复制回原路径）

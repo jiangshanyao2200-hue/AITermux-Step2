@@ -89,6 +89,7 @@ aitermux-cli-install update-projects
 - `bin/aitermux`：AITermux 启动器
 - `startboot/`：本机动画脚本池
 - `projectling/aidebug/`：Project凌 的本机调试日志目录，默认不随仓库发布
+- `backups/`：安装/更新备份目录，默认只保留最近 5 个 `upgrade-*`
 
 ## 使用前确认
 
