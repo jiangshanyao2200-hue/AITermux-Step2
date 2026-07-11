@@ -25,8 +25,17 @@ test "$(git -C "$new_home/projectling" remote get-url origin)" = "$CANONICAL_REP
 bash "$new_home/projectling/run.sh" --compat-migrate-only
 
 legacy_home="$TEST_ROOT/legacy/AItermux"
-mkdir -p "$legacy_home"
-git clone "$LEGACY_REPO" "$legacy_home/projectling"
+mkdir -p "$legacy_home/projectling"
+git -C "$legacy_home/projectling" init -b main >/dev/null
+git -C "$legacy_home/projectling" config user.name 'PROJECTling migration test'
+git -C "$legacy_home/projectling" config user.email 'projectling-migration-test@example.invalid'
+printf 'legacy fixture\n' >"$legacy_home/projectling/legacy-version.txt"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$legacy_home/projectling/run.sh"
+chmod +x "$legacy_home/projectling/run.sh"
+printf 'config/\ncontext/\nmemory/\naidebug/\n' >"$legacy_home/projectling/.gitignore"
+git -C "$legacy_home/projectling" add .gitignore legacy-version.txt run.sh
+git -C "$legacy_home/projectling" commit -m 'Create legacy fixture' >/dev/null
+git -C "$legacy_home/projectling" remote add origin "$LEGACY_REPO"
 mkdir -p \
   "$legacy_home/projectling/config" \
   "$legacy_home/projectling/context" \
