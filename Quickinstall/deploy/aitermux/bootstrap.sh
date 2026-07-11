@@ -7,7 +7,7 @@ AITERMUX_REPO="${AITERMUX_REPO:-https://github.com/jiangshanyao2200-hue/longgu-t
 PROJECTYING_DIR="$AITERMUX_HOME/projectying"
 PROJECTLING_DIR="$AITERMUX_HOME/projectling"
 PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/projectying-termux.git}"
-PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/projectling-termux.git}"
+PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/PROJECTling.git}"
 STATE_DIR="$AITERMUX_HOME/.state/bootstrap"
 AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/projectling/aidebug}"
 LOG_DIR="$AIDEBUG_DIR/logs"
@@ -29,7 +29,7 @@ AITermux bootstrap
 
 说明：
   默认会检查并补装 projectying、projectling、codex、gemini、claude。
-  projectying/projectling 默认从公开 Termux 仓库 clone；可用 AITERMUX_PROJECTYING_REPO / AITERMUX_PROJECTLING_REPO 覆盖。
+  projectying/projectling 默认从各自唯一公开仓库 clone；可用 AITERMUX_PROJECTYING_REPO / AITERMUX_PROJECTLING_REPO 覆盖。
   --update 对 aitermux/projectying/projectling 生效：检查远端 main 是否有新提交，有就 fast-forward 拉取源码。
   失败会写入 ~/AItermux/projectling/aidebug/logs/startup.log，并做短暂退避，避免每次登录都重复阻塞。
 EOF
@@ -619,6 +619,7 @@ ensure_git_remote_url() {
   local dir="$1"
   local repo="$2"
   local current=""
+  local canonical_projectling="https://github.com/jiangshanyao2200-hue/PROJECTling.git"
 
   current="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
   if [[ -z "$current" ]]; then
@@ -626,6 +627,17 @@ ensure_git_remote_url() {
     return 0
   fi
   if [[ "$current" != "$repo" ]]; then
+    if [[ "$repo" == "$canonical_projectling" ]]; then
+      case "$current" in
+        https://github.com/jiangshanyao2200-hue/projectling-termux|\
+        https://github.com/jiangshanyao2200-hue/projectling-termux.git|\
+        git@github.com:jiangshanyao2200-hue/projectling-termux.git)
+          log "git remote migrate path=$dir from=$current to=$repo"
+          git -C "$dir" remote set-url origin "$repo" || return 1
+          return 0
+          ;;
+      esac
+    fi
     log "git remote differs path=$dir current=$current expected=$repo"
     state_set "$(basename "$dir")" fail remote-mismatch
     return 1
@@ -718,6 +730,16 @@ update_git_project_locked() {
     log "component=${component} update-none head=${before:0:12}"
     state_set "$component" ok up-to-date action=update "before=${before:0:12}" "after=${before:0:12}"
     return 0
+  fi
+  if [[ "$component" == "projectling" ]] && ! git -C "$dir" merge-base "$before" "$fetched" >/dev/null 2>&1; then
+    if backup="$(reclone_projectling_unrelated_history)"; then
+      after="$(git_local_head "$dir")"
+      log "component=projectling update-migrated-unified-repo before=${before:0:12} after=${after:0:12} backup=${backup}"
+      state_set "$component" ok migrated-unified-repo action=update "before=${before:0:12}" "after=${after:0:12}" "backup=${backup}"
+      return 0
+    fi
+    state_set "$component" fail unified-repo-migration-failed action=update "before=${before:0:12}" "remote=${fetched:0:12}"
+    return 1
   fi
   if git -C "$dir" merge-base --is-ancestor "$fetched" "$before" 2>/dev/null; then
     log "component=${component} update-local-ahead local=${before:0:12} remote=${fetched:0:12}"
@@ -843,6 +865,32 @@ copy_projectling_runtime_from_backup() {
     mkdir -p "$PROJECTLING_DIR/config" >/dev/null 2>&1 || true
     cp -a "$backup/config/env" "$PROJECTLING_DIR/config/env" >/dev/null 2>&1 || true
   fi
+}
+
+reclone_projectling_unrelated_history() {
+  local stamp backup tmp_dir
+
+  [[ -d "$PROJECTLING_DIR/.git" ]] || return 1
+  ensure_projectling_stack || return 1
+  stamp="$(date +%Y%m%d-%H%M%S 2>/dev/null || date +%s 2>/dev/null || echo now)"
+  backup="${PROJECTLING_DIR}.legacy-${stamp}"
+  tmp_dir="${PROJECTLING_DIR}.clone-${stamp}.$$"
+
+  rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  git clone "$PROJECTLING_REPO" "$tmp_dir" || return 1
+  mv "$PROJECTLING_DIR" "$backup" || {
+    rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+    return 1
+  }
+  if ! mv "$tmp_dir" "$PROJECTLING_DIR"; then
+    mv "$backup" "$PROJECTLING_DIR" >/dev/null 2>&1 || true
+    rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  copy_projectling_runtime_from_backup "$backup"
+  chmod u+x "$PROJECTLING_DIR/run.sh" >/dev/null 2>&1 || true
+  printf '%s\n' "$backup"
 }
 
 reclone_projectling_non_git_dir() {

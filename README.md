@@ -27,7 +27,7 @@ AITermux 不是通用桌面程序，不承诺支持 Linux 桌面、Windows、mac
 
 ```bash
 export AITERMUX_PROJECTYING_REPO='https://github.com/jiangshanyao2200-hue/projectying-termux.git'
-export AITERMUX_PROJECTLING_REPO='https://github.com/jiangshanyao2200-hue/projectling-termux.git'
+export AITERMUX_PROJECTLING_REPO='https://github.com/jiangshanyao2200-hue/PROJECTling.git'
 ```
 
 ## 快速开始
@@ -66,7 +66,7 @@ bash install.sh
 `aitermux-bootstrap` 当前处理五类组件：
 
 - `projectying`：缺失时从 `projectying-termux` clone，更新走 `git pull --ff-only`
-- `projectling`：缺失时从 `projectling-termux` clone，更新走 `git pull --ff-only`
+- `projectling`：缺失时从唯一公开仓库 `PROJECTling` clone；旧 `projectling-termux` remote 会在更新时安全迁移到统一仓库
 - `codex`：通过 npm 全局安装 `@openai/codex`，并补齐 `@openai/codex-linux-arm64` / `@openai/codex-linux-x64` 原生组件；验证命令、入口文件和 native vendor binary
 - `gemini`：通过 npm 全局安装 `@google/gemini-cli`，写入 Termux 包装器，并用 `gemini --version` 验证
 - `claude`：安装 `@anthropic-ai/claude-code`，必要时补装 Alpine proot 与 `@anthropic-ai/claude-code-linux-arm64-musl`，并用 `claude --version` 验证
