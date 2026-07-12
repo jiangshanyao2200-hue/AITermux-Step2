@@ -3,7 +3,7 @@ set -euo pipefail
 
 PUBLIC_ROOT="${1:-}"
 if [[ -z "$PUBLIC_ROOT" || ! -f "$PUBLIC_ROOT/run.sh" || ! -f "$PUBLIC_ROOT/app/run.sh" ]]; then
-  printf 'usage: %s /path/to/PROJECTling-public-root\n' "$0" >&2
+  printf 'usage: %s /path/to/ProjectLing-public-root\n' "$0" >&2
   exit 2
 fi
 

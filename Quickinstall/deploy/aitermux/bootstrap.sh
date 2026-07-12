@@ -3,11 +3,11 @@ set -euo pipefail
 
 AITERMUX_HOME="${AITERMUX_HOME:-$HOME/AItermux}"
 PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
-AITERMUX_REPO="${AITERMUX_REPO:-https://github.com/jiangshanyao2200-hue/longgu-termux-kit-step2.git}"
+AITERMUX_REPO="${AITERMUX_REPO:-https://github.com/jiangshanyao2200-hue/AITermux-Step2.git}"
 PROJECTYING_DIR="$AITERMUX_HOME/projectying"
 PROJECTLING_DIR="$AITERMUX_HOME/projectling"
-PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/projectying-termux.git}"
-PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/PROJECTling.git}"
+PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/ProjectYing.git}"
+PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/ProjectLing.git}"
 STATE_DIR="$AITERMUX_HOME/.state/bootstrap"
 AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/projectling/aidebug}"
 LOG_DIR="$AIDEBUG_DIR/logs"
@@ -619,7 +619,9 @@ ensure_git_remote_url() {
   local dir="$1"
   local repo="$2"
   local current=""
-  local canonical_projectling="https://github.com/jiangshanyao2200-hue/PROJECTling.git"
+  local canonical_projectling="https://github.com/jiangshanyao2200-hue/ProjectLing.git"
+  local canonical_projectying="https://github.com/jiangshanyao2200-hue/ProjectYing.git"
+  local canonical_aitermux="https://github.com/jiangshanyao2200-hue/AITermux-Step2.git"
 
   current="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
   if [[ -z "$current" ]]; then
@@ -629,9 +631,34 @@ ensure_git_remote_url() {
   if [[ "$current" != "$repo" ]]; then
     if [[ "$repo" == "$canonical_projectling" ]]; then
       case "$current" in
+        https://github.com/jiangshanyao2200-hue/PROJECTling|\
+        https://github.com/jiangshanyao2200-hue/PROJECTling.git|\
+        git@github.com:jiangshanyao2200-hue/PROJECTling.git|\
         https://github.com/jiangshanyao2200-hue/projectling-termux|\
         https://github.com/jiangshanyao2200-hue/projectling-termux.git|\
         git@github.com:jiangshanyao2200-hue/projectling-termux.git)
+          log "git remote migrate path=$dir from=$current to=$repo"
+          git -C "$dir" remote set-url origin "$repo" || return 1
+          return 0
+          ;;
+      esac
+    fi
+    if [[ "$repo" == "$canonical_projectying" ]]; then
+      case "$current" in
+        https://github.com/jiangshanyao2200-hue/projectying-termux|\
+        https://github.com/jiangshanyao2200-hue/projectying-termux.git|\
+        git@github.com:jiangshanyao2200-hue/projectying-termux.git)
+          log "git remote migrate path=$dir from=$current to=$repo"
+          git -C "$dir" remote set-url origin "$repo" || return 1
+          return 0
+          ;;
+      esac
+    fi
+    if [[ "$repo" == "$canonical_aitermux" ]]; then
+      case "$current" in
+        https://github.com/jiangshanyao2200-hue/longgu-termux-kit-step2|\
+        https://github.com/jiangshanyao2200-hue/longgu-termux-kit-step2.git|\
+        git@github.com:jiangshanyao2200-hue/longgu-termux-kit-step2.git)
           log "git remote migrate path=$dir from=$current to=$repo"
           git -C "$dir" remote set-url origin "$repo" || return 1
           return 0

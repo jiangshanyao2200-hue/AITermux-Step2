@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 BOOTSTRAP="$SCRIPT_ROOT/bin/aitermux-bootstrap"
-CANONICAL_REPO="${PROJECTLING_CANONICAL_REPO:-https://github.com/jiangshanyao2200-hue/PROJECTling.git}"
+CANONICAL_REPO="${PROJECTLING_CANONICAL_REPO:-https://github.com/jiangshanyao2200-hue/ProjectLing.git}"
 LEGACY_REPO="${PROJECTLING_LEGACY_REPO:-https://github.com/jiangshanyao2200-hue/projectling-termux.git}"
 TEST_ROOT="$(mktemp -d)"
 

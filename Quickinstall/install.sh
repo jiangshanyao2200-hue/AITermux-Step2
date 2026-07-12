@@ -5,8 +5,8 @@ QUICK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$QUICK_ROOT/.." && pwd)"
 PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
 AITERMUX_HOME="${AITERMUX_HOME:-$HOME/AItermux}"
-PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/projectying-termux.git}"
-PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/PROJECTling.git}"
+PROJECTYING_REPO="${AITERMUX_PROJECTYING_REPO:-https://github.com/jiangshanyao2200-hue/ProjectYing.git}"
+PROJECTLING_REPO="${AITERMUX_PROJECTLING_REPO:-https://github.com/jiangshanyao2200-hue/ProjectLing.git}"
 BACKUP_ROOT="$AITERMUX_HOME/backups"
 AIDEBUG_DIR="${AITERMUX_AIDEBUG_DIR:-$AITERMUX_HOME/projectling/aidebug}"
 AIDEBUG_LOG_DIR="$AIDEBUG_DIR/logs"
@@ -31,8 +31,8 @@ AITermux 一键覆盖部署（Termux）
 环境变量：
   AITERMUX_HOME            默认：$HOME/AItermux
   AITERMUX_AIDEBUG_DIR     默认：$HOME/AItermux/projectling/aidebug
-  AITERMUX_PROJECTYING_REPO 默认：https://github.com/jiangshanyao2200-hue/projectying-termux.git
-  AITERMUX_PROJECTLING_REPO 默认：https://github.com/jiangshanyao2200-hue/PROJECTling.git
+  AITERMUX_PROJECTYING_REPO 默认：https://github.com/jiangshanyao2200-hue/ProjectYing.git
+  AITERMUX_PROJECTLING_REPO 默认：https://github.com/jiangshanyao2200-hue/ProjectLing.git
 EOF
 }
 

@@ -3,9 +3,9 @@
 2 安装git
 `pkg update -y && pkg install -y git`
 3 clone 脚本
-`git clone https://github.com/jiangshanyao2200-hue/longgu-termux-kit-step1`
+`git clone https://github.com/jiangshanyao2200-hue/AITermux-Step1`
 4 进入目录
-`cd ~/longgu-termux-kit-step1`
+`cd ~/AITermux-Step1`
 5 运行脚本
 `bash stage1-prereqs.sh`
 
