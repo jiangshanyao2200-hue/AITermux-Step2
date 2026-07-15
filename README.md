@@ -79,9 +79,12 @@ bash install.sh
 aitermux-cli-install codex
 aitermux-cli-install gemini
 aitermux-cli-install claude
+aitermux-cli-install update-projectling
 aitermux-cli-install update-aitermux
 aitermux-cli-install update-projects
 ```
+
+`update-projectling` 完成后重新打开 zsh 会话即可加载新 Hook；若当前 ProjectLing 提供 `projectling_reload`，也可以直接热重载。
 
 GitHub 推送凭据可用本机登录助手保存：
 

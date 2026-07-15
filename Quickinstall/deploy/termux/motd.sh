@@ -1412,6 +1412,45 @@ motd_projectling_runner() {
   printf '%s\n' "$ROOT_DIR/projectling/run.sh"
 }
 
+motd_invalidate_projectling_card() {
+  MOTD_LAUNCHER_CARD_SEED=''
+  MOTD_CARD_CACHE_KEY=''
+  MOTD_CARD_CACHE_LINES=()
+}
+
+motd_projectling_card_state_key() {
+  local project_root="$ROOT_DIR/projectling"
+  local app_root="$ROOT_DIR/projectling"
+  local path=''
+  local sig=''
+  local raw=''
+
+  if [ -f "$project_root/app/core.py" ]; then
+    app_root="$project_root/app"
+  fi
+  for path in \
+    "$project_root/run.sh" \
+    "$app_root/core.py" \
+    "$app_root/projectling.py" \
+    "$app_root/projectling.zsh" \
+    "$app_root/config/env" \
+    "$app_root/config/role.json" \
+    "$app_root/config/persona_links.json" \
+    "$app_root/config/roster.json"; do
+    if [ -e "$path" ]; then
+      sig="$(stat -c '%y:%s' "$path" 2>/dev/null || stat -f '%m:%z' "$path" 2>/dev/null || printf 'present')"
+    else
+      sig='missing'
+    fi
+    raw="${raw}|${sig}"
+  done
+  if command -v cksum >/dev/null 2>&1; then
+    printf '%s' "$raw" | cksum | awk '{print $1 ":" $2}'
+  else
+    printf '%s' "$raw"
+  fi
+}
+
 motd_has_projectling() {
   [ -x "$ROOT_DIR/projectling/run.sh" ]
 }
@@ -1429,15 +1468,14 @@ motd_reroll_projectling_card() {
   runner="$(motd_projectling_runner)"
   [ -x "$runner" ] || return 1
   "$runner" reroll-role >/dev/null 2>&1 || return 1
-  MOTD_LAUNCHER_CARD_SEED=''
-  MOTD_CARD_CACHE_KEY=''
-  MOTD_CARD_CACHE_LINES=()
+  motd_invalidate_projectling_card
   return 0
 }
 
 motd_open_projectling_settings() {
   local tab="${1:-root}"
   local runner=""
+  local rc=0
   if ! motd_ensure_projectling_now; then
     tty_printf '[launcher] 未找到 projectling settings 入口。\n'
     return 0
@@ -1450,8 +1488,9 @@ motd_open_projectling_settings() {
 
   motd_restore_tty_mode || true
   tty_printf '\n'
-  motd_tty_run "$ROOT_DIR/projectling" "$runner" shell-settings --tab "$tab"
-  return $?
+  motd_tty_run "$ROOT_DIR/projectling" "$runner" shell-settings --tab "$tab" || rc=$?
+  motd_invalidate_projectling_card
+  return "$rc"
 }
 
 motd_render_launcher_card_lines() {
@@ -1532,13 +1571,15 @@ motd_render_launcher_card() {
   local runner=""
   local line=''
   local cache_key=''
+  local state_key=''
   local -a card_cmd=()
   local -a card_lines=()
 
   cols="$(motd_term_cols)"
   card_height="${MOTD_LAUNCHER_CARD_HEIGHT:-0}"
   runner="$(motd_projectling_runner)"
-  cache_key="${cols}:${card_height}:${MOTD_LAUNCHER_CARD_SEED:-current}"
+  state_key="$(motd_projectling_card_state_key)"
+  cache_key="${cols}:${card_height}:${MOTD_LAUNCHER_CARD_SEED:-current}:${state_key}"
 
   if [ "$reroll" != "1" ] && [ "$cache_key" = "${MOTD_CARD_CACHE_KEY:-}" ] && [ "${#MOTD_CARD_CACHE_LINES[@]}" -gt 0 ] 2>/dev/null; then
     motd_sync_begin
@@ -1591,6 +1632,7 @@ motd_animate_launcher_card() {
   local initial_compact="${MOTD_FORCE_COMPACT:-0}"
   local current_compact=0
   local current_size=''
+  local state_key=''
   local -a anim_cmd=()
   local -a frame_lines=()
 
@@ -1651,7 +1693,8 @@ motd_animate_launcher_card() {
     motd_render_launcher_card_lines "$top_row" "${frame_lines[@]}"
     if [ "$final_card" = "1" ]; then
       MOTD_LAUNCHER_CARD_SEED=''
-      MOTD_CARD_CACHE_KEY="${cols}:${MOTD_LAUNCHER_CARD_HEIGHT:-0}:current"
+      state_key="$(motd_projectling_card_state_key)"
+      MOTD_CARD_CACHE_KEY="${cols}:${MOTD_LAUNCHER_CARD_HEIGHT:-0}:current:${state_key}"
       MOTD_CARD_CACHE_LINES=("${frame_lines[@]}")
     fi
     rendered=1
@@ -3478,6 +3521,9 @@ motd_run_component_update() {
   local component="$1"
 
   motd_bootstrap_component_now "$component" update || true
+  if [ "$component" = "projectling" ]; then
+    motd_invalidate_projectling_card
+  fi
   sleep 0.8
 }
 

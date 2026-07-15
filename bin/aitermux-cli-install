@@ -14,6 +14,7 @@ Usage:
   aitermux-cli-install claude
   aitermux-cli-install projectying
   aitermux-cli-install projectling
+  aitermux-cli-install update-projectling
   aitermux-cli-install update-aitermux
   aitermux-cli-install update-projects
   aitermux-cli-install all
@@ -54,6 +55,15 @@ case "$component" in
     run_update_component projectying ProjectYing || rc=1
     run_update_component projectling ProjectLing || rc=1
     exit "$rc"
+    ;;
+  update-projectling)
+    if run_update_component projectling ProjectLing; then
+      printf '[aitermux-update] 请重新打开 zsh 会话；如 Hook 提供 projectling_reload，也可立即热重载。\n'
+      exit 0
+    else
+      rc=$?
+      exit "$rc"
+    fi
     ;;
   update-aitermux)
     exec "$BOOTSTRAP" --force --update --component aitermux
